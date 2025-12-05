@@ -2254,6 +2254,11 @@ int main()
     {
         std::cerr << "Could not load NPC texture (images/npc_head.bmp). Using flat color.\n";
     }
+    GLuint npcTextureAlt = loadTextureFromBMP("images/npc_head_alt.bmp");
+    if (npcTextureAlt == 0)
+    {
+        std::cerr << "Could not load NPC texture (images/npc_head_alt.bmp). Using flat color.\n";
+    }
 
     World world(WIDTH, HEIGHT, DEPTH);
     CHUNK_X_COUNT = (WIDTH + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -2277,6 +2282,12 @@ int main()
     npc.x = npcGridX + 0.5f;
     npc.z = npcGridZ + 0.5f;
     npc.y = world.surfaceY(npcGridX, npcGridZ);
+
+    NPC npc2 = npc;
+    npc2.texture = npcTextureAlt ? npcTextureAlt : npcTexture;
+    npc2.x = npcGridX - 3.5f;
+    npc2.z = npcGridZ - 1.5f;
+    npc2.y = world.surfaceY(static_cast<int>(npc2.x), static_cast<int>(npc2.z));
 
     int selected = 0;
     std::vector<ItemStack> hotbarSlots(HOTBAR.size());
@@ -2600,6 +2611,7 @@ int main()
         player.vz *= 0.85f;
 
         updateNpc(npc, world, simDt);
+        updateNpc(npc2, world, simDt);
         updateLogic(world);
 
         glClearColor(0.55f, 0.75f, 0.95f, 1.0f);
@@ -2659,8 +2671,9 @@ int main()
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
 
-        // NPC blocky model
+        // NPC blocky models
         drawNpcBlocky(npc);
+        drawNpcBlocky(npc2);
 
         // bouton 0/1 affiché directement sur le bloc proche du joueur
         drawButtonStateLabels(world, player, 10.0f);
