@@ -5,6 +5,7 @@
 #include <GL/glu.h>
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -27,7 +28,12 @@ enum class BlockType
     Water,
     Plank,
     Sand,
-    Glass
+    Glass,
+    AndGate,
+    OrGate,
+    Led,
+    Button,
+    Wire
 };
 
 struct Player
@@ -75,6 +81,14 @@ struct PauseMenuLayout
     float quitX = 0.0f, quitY = 0.0f, quitW = 0.0f, quitH = 0.0f;
 };
 
+struct HoverLabel
+{
+    bool valid = false;
+    std::string text;
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
 static const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Air, {"Air", false, {0.7f, 0.85f, 1.0f}}},
     {BlockType::Grass, {"Grass", true, {0.2f, 0.7f, 0.2f}}},
@@ -86,12 +100,19 @@ static const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Plank, {"Plank", true, {0.75f, 0.6f, 0.4f}}},
     {BlockType::Sand, {"Sand", true, {0.9f, 0.8f, 0.6f}}},
     {BlockType::Glass, {"Glass", true, {0.82f, 0.93f, 0.98f}}},
+    {BlockType::AndGate, {"AND", true, {0.18f, 0.7f, 0.32f}}},
+    {BlockType::OrGate, {"OR", true, {0.92f, 0.56f, 0.18f}}},
+    {BlockType::Led, {"LED", true, {0.95f, 0.9f, 0.2f}}},
+    {BlockType::Button, {"Button", true, {0.6f, 0.2f, 0.2f}}},
+    {BlockType::Wire, {"Wire", true, {0.55f, 0.55f, 0.58f}}},
 };
 
 static const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
                                               BlockType::Stone, BlockType::Glass};
 static const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
-                                                         BlockType::Stone, BlockType::Glass};
+                                                         BlockType::Stone, BlockType::Glass, BlockType::AndGate,
+                                                         BlockType::OrGate, BlockType::Led, BlockType::Button,
+                                                         BlockType::Wire};
 
 struct Vertex
 {
@@ -110,10 +131,33 @@ struct ChunkMesh
 class World
 {
 public:
-    World(int w, int h, int d) : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air) {}
+    World(int w, int h, int d)
+        : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), power(w * h * d, 0),
+          buttonState(w * h * d, 0)
+    {
+    }
 
-    BlockType get(int x, int y, int z) const { return tiles[(y * depth + z) * width + x]; }
-    void set(int x, int y, int z, BlockType b) { tiles[(y * depth + z) * width + x] = b; }
+    BlockType get(int x, int y, int z) const { return tiles[index(x, y, z)]; }
+    void set(int x, int y, int z, BlockType b)
+    {
+        int idx = index(x, y, z);
+        tiles[idx] = b;
+        power[idx] = 0;
+        if (b != BlockType::Button)
+            buttonState[idx] = 0;
+    }
+    uint8_t getPower(int x, int y, int z) const { return power[index(x, y, z)]; }
+    void setPower(int x, int y, int z, uint8_t v) { power[index(x, y, z)] = v; }
+    uint8_t getButtonState(int x, int y, int z) const { return buttonState[index(x, y, z)]; }
+    void setButtonState(int x, int y, int z, uint8_t v) { buttonState[index(x, y, z)] = v; }
+    void toggleButton(int x, int y, int z)
+    {
+        int idx = index(x, y, z);
+        buttonState[idx] = buttonState[idx] ? 0 : 1;
+    }
+    int index(int x, int y, int z) const { return (y * depth + z) * width + x; }
+    int totalSize() const { return static_cast<int>(tiles.size()); }
+    void overwritePower(const std::vector<uint8_t> &next) { power = next; }
     int getWidth() const { return width; }
     int getHeight() const { return height; }
     int getDepth() const { return depth; }
@@ -124,6 +168,8 @@ public:
         (void)rng; // seed kept for future randomness if needed
 
         int surface = height / 4; // flat world height
+        std::fill(power.begin(), power.end(), 0);
+        std::fill(buttonState.begin(), buttonState.end(), 0);
         for (int z = 0; z < depth; ++z)
         {
             for (int x = 0; x < width; ++x)
@@ -162,9 +208,20 @@ private:
     int height;
     int depth;
     std::vector<BlockType> tiles;
+    std::vector<uint8_t> power;
+    std::vector<uint8_t> buttonState;
 };
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
+
+bool occludesFaces(BlockType b)
+{
+    if (b == BlockType::Wire)
+        return false;
+    if (b == BlockType::Glass)
+        return false;
+    return isSolid(b);
+}
 
 bool collidesAt(const World &world, float px, float py, float pz, float playerHeight)
 {
@@ -299,6 +356,8 @@ HitInfo raycast(const World &world, float ox, float oy, float oz, float dx, floa
 
 bool isTransparent(BlockType b)
 {
+    if (b == BlockType::Wire)
+        return true;
     if (b == BlockType::Glass)
         return true;
     return !isSolid(b);
@@ -316,10 +375,25 @@ bool blockIntersectsPlayer(const Player &player, int bx, int by, int bz, float p
     return (bx + 1 > minX && bx < maxX && bz + 1 > minZ && bz < maxZ && by + 1 > minY && by < maxY);
 }
 
+void markChunkFromBlock(int x, int y, int z);
+
 struct Vec3
 {
     float x, y, z;
 };
+
+Vec3 cross(const Vec3 &a, const Vec3 &b)
+{
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+Vec3 normalizeVec(const Vec3 &v)
+{
+    float len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (len < 1e-6f)
+        return {0.0f, 0.0f, 0.0f};
+    return {v.x / len, v.y / len, v.z / len};
+}
 
 // Mesh par chunk (VBO)
 const int CHUNK_SIZE = 16;
@@ -329,9 +403,11 @@ int CHUNK_Z_COUNT = 0;
 std::vector<ChunkMesh> chunkMeshes;
 GLuint gAtlasTex = 0;
 const int ATLAS_COLS = 4;
-const int ATLAS_ROWS = 4;
+const int ATLAS_ROWS = 5;
 const int ATLAS_TILE_SIZE = 32;
 std::map<BlockType, int> gBlockTile;
+int gAndTopTile = 0;
+int gOrTopTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 5;
 const int INV_ROWS = 3;
@@ -387,6 +463,184 @@ void updateNpc(NPC &npc, const World &world, float dt)
         npc.z = nextZ;
         npc.y = static_cast<float>(world.surfaceY(tileX, tileZ));
     }
+}
+
+void updateLogic(World &world)
+{
+    int total = world.totalSize();
+    std::vector<uint8_t> next(total, 0);
+    std::vector<uint8_t> sources(total, 0);
+    std::vector<std::array<int, 3>> gateOutputs;
+    gateOutputs.reserve(total / 16);
+
+    auto idx = [&](int x, int y, int z)
+    { return world.index(x, y, z); };
+    auto powerAt = [&](int x, int y, int z) -> uint8_t
+    {
+        if (!world.inside(x, y, z))
+            return 0;
+        return world.getPower(x, y, z);
+    };
+
+    // 1) evaluate sources (buttons, directional gates)
+    for (int y = 0; y < world.getHeight(); ++y)
+    {
+        for (int z = 0; z < world.getDepth(); ++z)
+        {
+            for (int x = 0; x < world.getWidth(); ++x)
+            {
+                BlockType b = world.get(x, y, z);
+                uint8_t out = 0;
+                switch (b)
+                {
+                case BlockType::AndGate:
+                {
+                    int inA = powerAt(x - 1, y, z) ? 1 : 0;
+                    int inB = powerAt(x + 1, y, z) ? 1 : 0;
+                    out = (inA && inB) ? 1 : 0;
+                    if (out)
+                        gateOutputs.push_back({x, y, z});
+                    break;
+                }
+                case BlockType::OrGate:
+                {
+                    int inA = powerAt(x - 1, y, z) ? 1 : 0;
+                    int inB = powerAt(x + 1, y, z) ? 1 : 0;
+                    out = (inA || inB) ? 1 : 0;
+                    if (out)
+                        gateOutputs.push_back({x, y, z});
+                    break;
+                }
+                case BlockType::Button:
+                    out = world.getButtonState(x, y, z) ? 1 : 0;
+                    break;
+                default:
+                    out = 0;
+                    break;
+                }
+                if (out && b == BlockType::Button)
+                {
+                    sources[idx(x, y, z)] = 1;
+                    next[idx(x, y, z)] = 1;
+                }
+            }
+        }
+    }
+
+    // 2) propagate via wires (BFS from sources)
+    std::vector<int> queue;
+    queue.reserve(total / 4);
+    for (int i = 0; i < total; ++i)
+        if (sources[i])
+            queue.push_back(i);
+
+    auto setPower = [&](int x, int y, int z)
+    {
+        if (!world.inside(x, y, z))
+            return;
+        int i = idx(x, y, z);
+        if (next[i] == 0)
+            next[i] = 1;
+    };
+
+    auto pushWire = [&](int x, int y, int z)
+    {
+        if (!world.inside(x, y, z))
+            return;
+        int i = idx(x, y, z);
+        if (next[i] == 0)
+        {
+            next[i] = 1;
+            queue.push_back(i);
+        }
+    };
+
+    // gate outputs: fixed direction toward +Z
+    for (const auto &g : gateOutputs)
+    {
+        int ox = g[0];
+        int oy = g[1];
+        int oz = g[2] + 1;
+        if (!world.inside(ox, oy, oz))
+            continue;
+        int outIdx = idx(ox, oy, oz);
+        BlockType outB = world.get(ox, oy, oz);
+        if (outB == BlockType::Wire)
+        {
+            if (next[outIdx] == 0)
+                next[outIdx] = 1;
+            queue.push_back(outIdx); // always explore from the gate output wire
+        }
+        else
+        {
+            setPower(ox, oy, oz);
+        }
+    }
+
+    while (!queue.empty())
+    {
+        int i = queue.back();
+        queue.pop_back();
+        int x = i % world.getWidth();
+        int y = (i / world.getWidth()) / world.getDepth();
+        int z = (i / world.getWidth()) % world.getDepth();
+
+        int nx[6] = {x + 1, x - 1, x, x, x, x};
+        int ny[6] = {y, y, y + 1, y - 1, y, y};
+        int nz[6] = {z, z, z, z, z + 1, z - 1};
+        for (int k = 0; k < 6; ++k)
+        {
+            int xx = nx[k], yy = ny[k], zz = nz[k];
+            if (!world.inside(xx, yy, zz))
+                continue;
+            BlockType nb = world.get(xx, yy, zz);
+            if (nb == BlockType::Wire)
+                pushWire(xx, yy, zz);
+        }
+    }
+
+    auto nextAt = [&](int x, int y, int z) -> uint8_t
+    {
+        if (!world.inside(x, y, z))
+            return 0;
+        return next[idx(x, y, z)];
+    };
+
+    // 3) LEDs light up if a neighbour is powered (or direct pre-set)
+    for (int y = 0; y < world.getHeight(); ++y)
+    {
+        for (int z = 0; z < world.getDepth(); ++z)
+        {
+            for (int x = 0; x < world.getWidth(); ++x)
+            {
+                if (world.get(x, y, z) != BlockType::Led)
+                    continue;
+                int nx[6] = {x + 1, x - 1, x, x, x, x};
+                int ny[6] = {y, y, y + 1, y - 1, y, y};
+                int nz[6] = {z, z, z, z, z + 1, z - 1};
+                uint8_t lit = nextAt(x, y, z);
+                for (int i = 0; i < 6 && !lit; ++i)
+                    lit = nextAt(nx[i], ny[i], nz[i]) ? 1 : 0;
+                next[idx(x, y, z)] = lit;
+            }
+        }
+    }
+
+    // 4) mark dirty if changed then overwrite state
+    for (int y = 0; y < world.getHeight(); ++y)
+    {
+        for (int z = 0; z < world.getDepth(); ++z)
+        {
+            for (int x = 0; x < world.getWidth(); ++x)
+            {
+                uint8_t old = world.getPower(x, y, z);
+                uint8_t nw = next[idx(x, y, z)];
+                if (old != nw)
+                    markChunkFromBlock(x, y, z);
+            }
+        }
+    }
+    world.overwritePower(next);
 }
 
 void drawBlockFaces(const World &world, int x, int y, int z, float s, const std::array<float, 3> &color)
@@ -908,7 +1162,72 @@ void drawNumber(float x, float y, int value, float size, float r, float g, float
     }
 }
 
+void drawDigitBillboard(const Vec3 &pos, float size, int digit, const Vec3 &right, const Vec3 &up, float r, float g,
+                        float b, float a)
+{
+    static const int segMap[10][7] = {
+        {1, 1, 1, 1, 1, 1, 0}, {0, 1, 1, 0, 0, 0, 0}, {1, 1, 0, 1, 1, 0, 1}, {1, 1, 1, 1, 0, 0, 1}, {0, 1, 1, 0, 0, 1, 1}, {1, 0, 1, 1, 0, 1, 1}, {1, 0, 1, 1, 1, 1, 1}, {1, 1, 1, 0, 0, 0, 0}, {1, 1, 1, 1, 1, 1, 1}, {1, 1, 1, 1, 0, 1, 1}};
+
+    const float w = size;
+    const float h = size * 1.6f;
+    const float t = size * 0.18f;
+
+    auto quad = [&](float ox, float oy, float ow, float oh)
+    {
+        Vec3 p0{pos.x + (ox - w * 0.5f) * right.x + (oy - h * 0.5f) * up.x,
+                pos.y + (ox - w * 0.5f) * right.y + (oy - h * 0.5f) * up.y,
+                pos.z + (ox - w * 0.5f) * right.z + (oy - h * 0.5f) * up.z};
+        Vec3 p1{p0.x + ow * right.x, p0.y + ow * right.y, p0.z + ow * right.z};
+        Vec3 p3{p0.x + oh * up.x, p0.y + oh * up.y, p0.z + oh * up.z};
+        Vec3 p2{p1.x + oh * up.x, p1.y + oh * up.y, p1.z + oh * up.z};
+
+        glBegin(GL_QUADS);
+        glColor4f(r, g, b, a);
+        glVertex3f(p0.x, p0.y, p0.z);
+        glVertex3f(p1.x, p1.y, p1.z);
+        glVertex3f(p2.x, p2.y, p2.z);
+        glVertex3f(p3.x, p3.y, p3.z);
+        glEnd();
+    };
+
+    if (segMap[digit][0])
+        quad(t, 0, w - 2 * t, t);
+    if (segMap[digit][1])
+        quad(w - t, t, t, h / 2 - t * 1.1f);
+    if (segMap[digit][2])
+        quad(w - t, h / 2 + t * 0.1f, t, h / 2 - t * 1.1f);
+    if (segMap[digit][3])
+        quad(t, h - t, w - 2 * t, t);
+    if (segMap[digit][4])
+        quad(0, h / 2 + t * 0.1f, t, h / 2 - t * 1.1f);
+    if (segMap[digit][5])
+        quad(0, t, t, h / 2 - t * 1.1f);
+    if (segMap[digit][6])
+        quad(t, h / 2 - t * 0.5f, w - 2 * t, t);
+}
+
 // ---------- Texture atlas generation ----------
+static const std::map<char, std::array<uint8_t, 5>> FONT5x4 = {
+    {'A', {0b0110, 0b1001, 0b1111, 0b1001, 0b1001}},
+    {'B', {0b1110, 0b1001, 0b1110, 0b1001, 0b1110}},
+    {'C', {0b0111, 0b1000, 0b1000, 0b1000, 0b0111}},
+    {'D', {0b1110, 0b1001, 0b1001, 0b1001, 0b1110}},
+    {'E', {0b1111, 0b1000, 0b1110, 0b1000, 0b1111}},
+    {'G', {0b0111, 0b1000, 0b1011, 0b1001, 0b0111}},
+    {'I', {0b1110, 0b0100, 0b0100, 0b0100, 0b1110}},
+    {'L', {0b1000, 0b1000, 0b1000, 0b1000, 0b1111}},
+    {'N', {0b1001, 0b1101, 0b1011, 0b1001, 0b1001}},
+    {'O', {0b0110, 0b1001, 0b1001, 0b1001, 0b0110}},
+    {'P', {0b1110, 0b1001, 0b1110, 0b1000, 0b1000}},
+    {'R', {0b1110, 0b1001, 0b1110, 0b1010, 0b1001}},
+    {'S', {0b0111, 0b1000, 0b0110, 0b0001, 0b1110}},
+    {'T', {0b1111, 0b0100, 0b0100, 0b0100, 0b0100}},
+    {'U', {0b1001, 0b1001, 0b1001, 0b1001, 0b0110}},
+    {'V', {0b1001, 0b1001, 0b1001, 0b0110, 0b0110}},
+    {'W', {0b1001, 0b1001, 0b1011, 0b1101, 0b1001}},
+    {'Y', {0b1001, 0b1001, 0b0110, 0b0100, 0b0100}},
+};
+
 void writePixel(std::vector<uint8_t> &pix, int texW, int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 {
     int idx = (y * texW + x) * 4;
@@ -968,10 +1287,155 @@ void fillTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array
             if (styleSeed == 99)
                 A = 180; // eau semi-transparente
             else if (styleSeed == 88)
-                A = 120; // verre transparent
+                A = 120;              // verre transparent
+            else if (styleSeed == 17) // LED légère transparence
+                A = 220;
+            else if (styleSeed == 19) // fil fin
+                A = 255;
             writePixel(pix, texW, x0 + x, y0 + y, R, G, B, A);
         }
     }
+}
+
+int tinyTextWidthOnTile(const std::string &text, int scale)
+{
+    if (text.empty())
+        return 0;
+    int spacing = scale;
+    int letters = static_cast<int>(text.size());
+    return letters * (4 * scale) + (letters - 1) * spacing;
+}
+
+void fillRect(std::vector<uint8_t> &pix, int texW, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+              uint8_t a)
+{
+    int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
+    int x0 = std::max(0, x);
+    int y0 = std::max(0, y);
+    int x1 = std::min(texW, x + w);
+    int y1 = std::min(texH, y + h);
+    for (int yy = y0; yy < y1; ++yy)
+    {
+        for (int xx = x0; xx < x1; ++xx)
+        {
+            writePixel(pix, texW, xx, yy, r, g, b, a);
+        }
+    }
+}
+
+void blitTinyCharToTile(std::vector<uint8_t> &pix, int texW, int tileIdx, int x, int y, char c, int scale, uint8_t r,
+                        uint8_t g, uint8_t b, uint8_t a)
+{
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    auto it = FONT5x4.find(c);
+    if (it == FONT5x4.end())
+        return;
+    int tileX = (tileIdx % ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int tileY = (tileIdx / ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
+    const auto &rows = it->second;
+    for (int row = 0; row < 5; ++row)
+    {
+        for (int col = 0; col < 4; ++col)
+        {
+            if ((rows[row] & (1 << (3 - col))) == 0)
+                continue;
+            for (int dy = 0; dy < scale; ++dy)
+            {
+                for (int dx = 0; dx < scale; ++dx)
+                {
+                    int px = tileX + x + col * scale + dx;
+                    int py = tileY + y + row * scale + dy;
+                    if (px < 0 || px >= texW || py < 0 || py >= texH)
+                        continue;
+                    writePixel(pix, texW, px, py, r, g, b, a);
+                }
+            }
+        }
+    }
+}
+
+void blitTinyTextToTile(std::vector<uint8_t> &pix, int texW, int tileIdx, int x, int y, const std::string &text,
+                        int scale, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    int cursor = x;
+    int spacing = scale;
+    for (char c : text)
+    {
+        blitTinyCharToTile(pix, texW, tileIdx, cursor, y, c, scale, r, g, b, a);
+        cursor += 4 * scale + spacing;
+    }
+}
+
+void drawGateTopLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
+                       const std::string &gateLabel)
+{
+    auto toByte = [](float v, float mul)
+    {
+        return static_cast<uint8_t>(std::clamp(v * mul, 0.0f, 1.0f) * 255.0f);
+    };
+
+    uint8_t accentR = toByte(baseColor[0], 1.25f);
+    uint8_t accentG = toByte(baseColor[1], 1.25f);
+    uint8_t accentB = toByte(baseColor[2], 1.25f);
+    uint8_t bgR = toByte(baseColor[0], 0.55f);
+    uint8_t bgG = toByte(baseColor[1], 0.55f);
+    uint8_t bgB = toByte(baseColor[2], 0.55f);
+    uint8_t textR = 245;
+    uint8_t textG = 245;
+    uint8_t textB = 240;
+
+    int tileX = (tileIdx % ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int tileY = (tileIdx / ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int centerX = ATLAS_TILE_SIZE / 2;
+    int midY = ATLAS_TILE_SIZE / 2 + 2;
+
+    // simple routing sketch: inputs on X edges, output toward +Z (texture bottom)
+    fillRect(pix, texW, tileX + centerX - 2, tileY, 4, midY - 1, accentR, accentG, accentB, 255);
+    fillRect(pix, texW, tileX + 8, tileY + midY - 1, ATLAS_TILE_SIZE - 16, 2, accentR, accentG, accentB, 255);
+    fillRect(pix, texW, tileX + 2, tileY + midY - 2, 5, 4, accentR, accentG, accentB, 255);
+    fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - 7, tileY + midY - 2, 5, 4, accentR, accentG, accentB, 255);
+
+    // small arrow head on the output side
+    for (int i = 0; i < 3; ++i)
+    {
+        int width = 5 - i * 2;
+        int startX = centerX - width / 2;
+        fillRect(pix, texW, tileX + startX, tileY + i, width, 1, textR, textG, textB, 255);
+    }
+
+    int labelScale = 1;
+    int labelHeight = 5 * labelScale;
+    int inWidth = tinyTextWidthOnTile("IN", labelScale);
+    int outWidth = tinyTextWidthOnTile("OUT", labelScale);
+    int gateWidth = tinyTextWidthOnTile(gateLabel, labelScale);
+
+    int inY = ATLAS_TILE_SIZE - labelHeight - 3;
+    int outY = 4;
+    int gateY = midY + 4;
+
+    fillRect(pix, texW, tileX + 1, tileY + inY - 1, inWidth + 4, labelHeight + 2, bgR, bgG, bgB, 255);
+    fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - inWidth - 5, tileY + inY - 1, inWidth + 4, labelHeight + 2, bgR,
+             bgG, bgB, 255);
+    fillRect(pix, texW, tileX + (ATLAS_TILE_SIZE - outWidth) / 2 - 2, tileY + outY - 1, outWidth + 4,
+             labelHeight + 2, bgR, bgG, bgB, 255);
+    fillRect(pix, texW, tileX + (ATLAS_TILE_SIZE - gateWidth) / 2 - 2, tileY + gateY - 1, gateWidth + 4,
+             labelHeight + 2, bgR, bgG, bgB, 255);
+
+    blitTinyTextToTile(pix, texW, tileIdx, 2, inY, "IN", labelScale, textR, textG, textB, 255);
+    int rightX = ATLAS_TILE_SIZE - inWidth - 2;
+    blitTinyTextToTile(pix, texW, tileIdx, rightX, inY, "IN", labelScale, textR, textG, textB, 255);
+    int outX = (ATLAS_TILE_SIZE - outWidth) / 2;
+    blitTinyTextToTile(pix, texW, tileIdx, outX, outY, "OUT", labelScale, textR, textG, textB, 255);
+    int gateX = (ATLAS_TILE_SIZE - gateWidth) / 2;
+    blitTinyTextToTile(pix, texW, tileIdx, gateX, gateY, gateLabel, labelScale, textR, textG, textB, 255);
+}
+
+void fillGateTileWithLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
+                            int styleSeed, const std::string &gateLabel)
+{
+    fillTile(pix, texW, tileIdx, baseColor, styleSeed);
+    drawGateTopLabels(pix, texW, tileIdx, baseColor, gateLabel);
 }
 
 GLuint loadTextureFromBMP(const std::string &path)
@@ -1005,10 +1469,24 @@ GLuint loadTextureFromBMP(const std::string &path)
 
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}};
+    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::Led, 12}, {BlockType::Button, 13}, {BlockType::Wire, 14}};
+
+    int nextTile = static_cast<int>(gBlockTile.size());
+    gAndTopTile = nextTile++;
+    gOrTopTile = nextTile++;
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
     int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
+    int atlasCapacity = ATLAS_COLS * ATLAS_ROWS;
+    int maxTileIdx = 0;
+    for (const auto &kv : gBlockTile)
+        maxTileIdx = std::max(maxTileIdx, kv.second);
+    maxTileIdx = std::max(maxTileIdx, std::max(gAndTopTile, gOrTopTile));
+    if (maxTileIdx >= atlasCapacity)
+    {
+        std::cerr << "Atlas capacity too small for gate labels.\n";
+        return;
+    }
     std::vector<uint8_t> pixels(texW * texH * 4, 0);
 
     auto base = [&](BlockType b)
@@ -1024,6 +1502,13 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Sand], base(BlockType::Sand), 2);
     fillTile(pixels, texW, gBlockTile[BlockType::Air], {0.7f, 0.85f, 1.0f}, 6);
     fillTile(pixels, texW, gBlockTile[BlockType::Glass], {0.85f, 0.9f, 0.95f}, 88);
+    fillTile(pixels, texW, gBlockTile[BlockType::AndGate], base(BlockType::AndGate), 15);
+    fillTile(pixels, texW, gBlockTile[BlockType::OrGate], base(BlockType::OrGate), 16);
+    fillTile(pixels, texW, gBlockTile[BlockType::Led], base(BlockType::Led), 17);
+    fillTile(pixels, texW, gBlockTile[BlockType::Button], base(BlockType::Button), 18);
+    fillTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire), 19);
+    fillGateTileWithLabels(pixels, texW, gAndTopTile, base(BlockType::AndGate), 15, "AND");
+    fillGateTileWithLabels(pixels, texW, gOrTopTile, base(BlockType::OrGate), 16, "OR");
 
     if (gAtlasTex == 0)
     {
@@ -1166,6 +1651,96 @@ bool pointInRect(float mx, float my, float x, float y, float w, float h)
     return mx >= x && mx <= x + w && my >= y && my <= y + h;
 }
 
+void drawCharTiny(float x, float y, float size, char c, float r, float g, float b, float a)
+{
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    auto it = FONT5x4.find(c);
+    if (it == FONT5x4.end())
+        return;
+    glColor4f(r, g, b, a);
+    const auto &rows = it->second;
+    for (int row = 0; row < 5; ++row)
+    {
+        for (int col = 0; col < 4; ++col)
+        {
+            if (rows[row] & (1 << (3 - col)))
+            {
+                drawQuad(x + col * size, y + row * size, size, size, r, g, b, a);
+            }
+        }
+    }
+}
+
+void drawTextTiny(float x, float y, float size, const std::string &text, float r, float g, float b, float a)
+{
+    float cursor = x;
+    const float spacing = size * 0.8f;
+    for (char c : text)
+    {
+        if (c == ' ')
+        {
+            cursor += 4 * size + spacing;
+            continue;
+        }
+        drawCharTiny(cursor, y, size, c, r, g, b, a);
+        cursor += 4 * size + spacing;
+    }
+}
+
+void drawTooltip(float mx, float my, int winW, int winH, const std::string &text)
+{
+    if (text.empty())
+        return;
+    float size = 9.0f;
+    float padding = 6.0f;
+    float width = static_cast<float>(text.size()) * (4 * size + size * 0.8f) - size * 0.8f + padding * 2;
+    float height = 5 * size + padding * 2;
+    float tx = mx + 18.0f;
+    float ty = my - height - 12.0f;
+    tx = std::clamp(tx, 4.0f, static_cast<float>(winW) - width - 4.0f);
+    ty = std::clamp(ty, 4.0f, static_cast<float>(winH) - height - 4.0f);
+    drawQuad(tx, ty, width, height, 0.05f, 0.05f, 0.08f, 0.9f);
+    drawOutline(tx, ty, width, height, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+    drawTextTiny(tx + padding, ty + padding, size, text, 1.0f, 0.95f, 0.85f, 1.0f);
+}
+
+void drawButtonStateLabels(const World &world, const Player &player, float radius)
+{
+    Vec3 fwd = forwardVec(player.yaw, player.pitch);
+    Vec3 right = normalizeVec(Vec3{fwd.z, 0.0f, -fwd.x});
+    if (std::abs(right.x) < 1e-4f && std::abs(right.z) < 1e-4f)
+        right = {1.0f, 0.0f, 0.0f};
+    Vec3 up = normalizeVec(cross(right, fwd));
+    float size = 0.22f;
+
+    int minX = std::max(0, static_cast<int>(std::floor(player.x - radius)));
+    int maxX = std::min(world.getWidth() - 1, static_cast<int>(std::ceil(player.x + radius)));
+    int minY = std::max(0, static_cast<int>(std::floor(player.y - radius)));
+    int maxY = std::min(world.getHeight() - 1, static_cast<int>(std::ceil(player.y + radius)));
+    int minZ = std::max(0, static_cast<int>(std::floor(player.z - radius)));
+    int maxZ = std::min(world.getDepth() - 1, static_cast<int>(std::ceil(player.z + radius)));
+
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_CULL_FACE);
+    for (int y = minY; y <= maxY; ++y)
+    {
+        for (int z = minZ; z <= maxZ; ++z)
+        {
+            for (int x = minX; x <= maxX; ++x)
+            {
+                if (world.get(x, y, z) != BlockType::Button)
+                    continue;
+                Vec3 pos{static_cast<float>(x) + 0.5f, static_cast<float>(y) + 1.2f, static_cast<float>(z) + 0.5f};
+                pos.x += up.x * 0.02f;
+                pos.y += up.y * 0.02f;
+                pos.z += up.z * 0.02f;
+                int state = world.getButtonState(x, y, z) ? 1 : 0;
+                float alpha = 0.95f;
+                drawDigitBillboard(pos, size, state, right, up, 1.0f, 0.95f, 0.2f, alpha);
+            }
+        }
+    }
+}
 void drawSlotBox(float x, float y, float slotSize, const ItemStack &slot, bool selected, bool hovered)
 {
     auto col = BLOCKS.at(slot.count > 0 ? slot.type : BlockType::Air).color;
@@ -1225,7 +1800,7 @@ SlotHit hitTestInventoryUI(int mx, int my, int winW, int winH)
 }
 
 void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &inventory, const std::vector<ItemStack> &hotbar,
-                        int pendingSlot, bool pendingIsHotbar, int mouseX, int mouseY)
+                        int pendingSlot, bool pendingIsHotbar, int mouseX, int mouseY, HoverLabel &hoverLabel)
 {
     const float slotSize = 54.0f;
     const float gap = 10.0f;
@@ -1249,6 +1824,13 @@ void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &invent
             bool hovered = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), x, y, slotSize, slotSize);
             bool selected = (!pendingIsHotbar && pendingSlot == idx);
             drawSlotBox(x, y, slotSize, inventory[idx], selected, hovered);
+            if (hovered && inventory[idx].count > 0 && BLOCKS.count(inventory[idx].type))
+            {
+                hoverLabel.valid = true;
+                hoverLabel.text = BLOCKS.at(inventory[idx].type).name;
+                hoverLabel.x = static_cast<float>(mouseX);
+                hoverLabel.y = static_cast<float>(mouseY);
+            }
         }
     }
 
@@ -1265,6 +1847,13 @@ void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &invent
         bool hovered = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), x, y, slotSize, slotSize);
         bool selected = (pendingIsHotbar && pendingSlot == i);
         drawSlotBox(x, y, slotSize, hotbar[i], selected, hovered);
+        if (hovered && hotbar[i].count > 0 && BLOCKS.count(hotbar[i].type))
+        {
+            hoverLabel.valid = true;
+            hoverLabel.text = BLOCKS.at(hotbar[i].type).name;
+            hoverLabel.x = static_cast<float>(mouseX);
+            hoverLabel.y = static_cast<float>(mouseY);
+        }
     }
 }
 
@@ -1441,6 +2030,56 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
             push(bx + 1, by, bz, u0, v1);
         }
     };
+    auto addBox = [&](float minX, float minY, float minZ, float maxX, float maxY, float maxZ, const std::array<float, 3> &col,
+                      int tile)
+    {
+        float br = col[0];
+        float bg = col[1];
+        float bb = col[2];
+        float du = 1.0f / ATLAS_COLS;
+        float dv = 1.0f / ATLAS_ROWS;
+        int tx = tile % ATLAS_COLS;
+        int ty = tile / ATLAS_COLS;
+        const float pad = 0.0015f;
+        float u0 = tx * du + pad;
+        float v0 = ty * dv + pad;
+        float u1 = (tx + 1) * du - pad;
+        float v1 = (ty + 1) * dv - pad;
+
+        auto push = [&](float px, float py, float pz, float u, float v)
+        { mesh.verts.push_back(Vertex{px, py, pz, u, v, br, bg, bb}); };
+
+        // +X
+        push(maxX, minY, minZ, u1, v1);
+        push(maxX, maxY, minZ, u1, v0);
+        push(maxX, maxY, maxZ, u0, v0);
+        push(maxX, minY, maxZ, u0, v1);
+        // -X
+        push(minX, minY, minZ, u1, v1);
+        push(minX, minY, maxZ, u0, v1);
+        push(minX, maxY, maxZ, u0, v0);
+        push(minX, maxY, minZ, u1, v0);
+        // +Y
+        push(minX, maxY, minZ, u1, v1);
+        push(maxX, maxY, minZ, u0, v1);
+        push(maxX, maxY, maxZ, u0, v0);
+        push(minX, maxY, maxZ, u1, v0);
+        // -Y
+        push(minX, minY, minZ, u1, v1);
+        push(maxX, minY, minZ, u0, v1);
+        push(maxX, minY, maxZ, u0, v0);
+        push(minX, minY, maxZ, u1, v0);
+        // +Z
+        push(minX, minY, maxZ, u1, v1);
+        push(maxX, minY, maxZ, u0, v1);
+        push(maxX, maxY, maxZ, u0, v0);
+        push(minX, maxY, maxZ, u1, v0);
+        // -Z
+        push(minX, minY, minZ, u1, v1);
+        push(minX, maxY, minZ, u1, v0);
+        push(maxX, maxY, minZ, u0, v0);
+        push(maxX, minY, minZ, u0, v1);
+    };
 
     for (int y = y0; y < y1; ++y)
     {
@@ -1456,19 +2095,90 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                 color[0] *= brightness;
                 color[1] *= brightness;
                 color[2] *= brightness;
+                if (b == BlockType::Led && world.getPower(x, y, z))
+                {
+                    color[0] = std::min(color[0] * 1.6f, 1.0f);
+                    color[1] = std::min(color[1] * 1.4f, 1.0f);
+                    color[2] = std::min(color[2] * 1.1f, 1.0f);
+                }
+                else if (b == BlockType::Led)
+                {
+                    const float desat = 0.12f;
+                    color[0] = std::min(color[0] * 0.25f + desat, 1.0f);
+                    color[1] = std::min(color[1] * 0.25f + desat, 1.0f);
+                    color[2] = std::min(color[2] * 0.25f + desat, 1.0f);
+                }
+                else if (b == BlockType::Wire && world.getPower(x, y, z))
+                {
+                    color[0] = std::min(color[0] + 0.3f, 1.0f);
+                    color[1] = std::min(color[1] + 0.05f, 1.0f);
+                    color[2] = std::min(color[2] + 0.05f, 1.0f);
+                }
                 int tIdx = tileIndexFor(b);
-                if (x == 0 || !isSolid(world.get(x - 1, y, z)))
-                    addFace(x, y, z, -1, 0, 0, color, tIdx);
-                if (x == world.getWidth() - 1 || !isSolid(world.get(x + 1, y, z)))
-                    addFace(x, y, z, 1, 0, 0, color, tIdx);
-                if (y == 0 || !isSolid(world.get(x, y - 1, z)))
-                    addFace(x, y, z, 0, -1, 0, color, tIdx);
-                if (y == world.getHeight() - 1 || !isSolid(world.get(x, y + 1, z)))
-                    addFace(x, y, z, 0, 1, 0, color, tIdx);
-                if (z == 0 || !isSolid(world.get(x, y, z - 1)))
-                    addFace(x, y, z, 0, 0, -1, color, tIdx);
-                if (z == world.getDepth() - 1 || !isSolid(world.get(x, y, z + 1)))
-                    addFace(x, y, z, 0, 0, 1, color, tIdx);
+                auto faceTile = [&](int nx, int ny, int nz)
+                {
+                    (void)nx;
+                    (void)nz;
+                    if (ny == 1)
+                    {
+                        if (b == BlockType::AndGate)
+                            return gAndTopTile;
+                        if (b == BlockType::OrGate)
+                            return gOrTopTile;
+                    }
+                    return tIdx;
+                };
+                if (b == BlockType::Wire)
+                {
+                    auto connects = [&](int dx, int dy, int dz)
+                    {
+                        int xx = x + dx;
+                        int yy = y + dy;
+                        int zz = z + dz;
+                        if (!world.inside(xx, yy, zz))
+                            return false;
+                        BlockType nb = world.get(xx, yy, zz);
+                        return nb == BlockType::Wire || nb == BlockType::Button || nb == BlockType::Led ||
+                               nb == BlockType::AndGate || nb == BlockType::OrGate;
+                    };
+
+                    float cx = static_cast<float>(x) + 0.5f;
+                    float cy = static_cast<float>(y) + 0.5f;
+                    float cz = static_cast<float>(z) + 0.5f;
+                    const float half = 0.12f;
+                    const float margin = 0.04f;
+
+                    addBox(cx - half, cy - half, cz - half, cx + half, cy + half, cz + half, color, tIdx);
+                    if (connects(1, 0, 0))
+                        addBox(cx, cy - half, cz - half, static_cast<float>(x + 1) - margin, cy + half, cz + half, color,
+                               tIdx);
+                    if (connects(-1, 0, 0))
+                        addBox(static_cast<float>(x) + margin, cy - half, cz - half, cx, cy + half, cz + half, color, tIdx);
+                    if (connects(0, 1, 0))
+                        addBox(cx - half, cy, cz - half, cx + half, static_cast<float>(y + 1) - margin, cz + half, color,
+                               tIdx);
+                    if (connects(0, -1, 0))
+                        addBox(cx - half, static_cast<float>(y) + margin, cz - half, cx + half, cy, cz + half, color, tIdx);
+                    if (connects(0, 0, 1))
+                        addBox(cx - half, cy - half, cz, cx + half, cy + half, static_cast<float>(z + 1) - margin, color,
+                               tIdx);
+                    if (connects(0, 0, -1))
+                        addBox(cx - half, cy - half, static_cast<float>(z) + margin, cx + half, cy + half, cz, color, tIdx);
+                    continue;
+                }
+
+                if (x == 0 || !occludesFaces(world.get(x - 1, y, z)))
+                    addFace(x, y, z, -1, 0, 0, color, faceTile(-1, 0, 0));
+                if (x == world.getWidth() - 1 || !occludesFaces(world.get(x + 1, y, z)))
+                    addFace(x, y, z, 1, 0, 0, color, faceTile(1, 0, 0));
+                if (y == 0 || !occludesFaces(world.get(x, y - 1, z)))
+                    addFace(x, y, z, 0, -1, 0, color, faceTile(0, -1, 0));
+                if (y == world.getHeight() - 1 || !occludesFaces(world.get(x, y + 1, z)))
+                    addFace(x, y, z, 0, 1, 0, color, faceTile(0, 1, 0));
+                if (z == 0 || !occludesFaces(world.get(x, y, z - 1)))
+                    addFace(x, y, z, 0, 0, -1, color, faceTile(0, 0, -1));
+                if (z == world.getDepth() - 1 || !occludesFaces(world.get(x, y, z + 1)))
+                    addFace(x, y, z, 0, 0, 1, color, faceTile(0, 0, 1));
             }
         }
     }
@@ -1573,7 +2283,7 @@ int main()
     for (size_t i = 0; i < HOTBAR.size(); ++i)
     {
         hotbarSlots[i].type = HOTBAR[i];
-        hotbarSlots[i].count = 50;
+        hotbarSlots[i].count = 64;
     }
     std::vector<ItemStack> inventorySlots(INV_COLS * INV_ROWS);
     {
@@ -1583,7 +2293,7 @@ int main()
             if (idx >= static_cast<int>(inventorySlots.size()))
                 break;
             inventorySlots[idx].type = b;
-            inventorySlots[idx].count = 32;
+            inventorySlots[idx].count = 64;
             ++idx;
         }
     }
@@ -1771,29 +2481,29 @@ int main()
                             BlockType bt = world.get(hit.x, hit.y, hit.z);
                             if (bt != BlockType::Air && bt != BlockType::Water)
                             {
-                                int left = addToInventory(bt, 1, hotbarSlots, inventorySlots);
-                                (void)left;
                                 world.set(hit.x, hit.y, hit.z, BlockType::Air);
                                 markNeighborsDirty(hit.x, hit.y, hit.z);
                             }
                         }
                         else if (e.button.button == SDL_BUTTON_RIGHT)
                         {
-                            int nx = hit.x + hit.nx;
-                            int ny = hit.y + hit.ny;
-                            int nz = hit.z + hit.nz;
-                            if (world.inside(nx, ny, nz) && !isSolid(world.get(nx, ny, nz)) &&
-                                !blockIntersectsPlayer(player, nx, ny, nz, PLAYER_HEIGHT))
+                            BlockType target = world.get(hit.x, hit.y, hit.z);
+                            if (target == BlockType::Button)
                             {
-                                ItemStack &slot = hotbarSlots[selected];
-                                if (slot.count > 0)
+                                world.toggleButton(hit.x, hit.y, hit.z);
+                            }
+                            else
+                            {
+                                int nx = hit.x + hit.nx;
+                                int ny = hit.y + hit.ny;
+                                int nz = hit.z + hit.nz;
+                                if (world.inside(nx, ny, nz) && !isSolid(world.get(nx, ny, nz)) &&
+                                    !blockIntersectsPlayer(player, nx, ny, nz, PLAYER_HEIGHT))
                                 {
-                                    BlockType toPlace = slot.type;
-                                    if (toPlace != BlockType::Air)
+                                    ItemStack &slot = hotbarSlots[selected];
+                                    if (slot.type != BlockType::Air)
                                     {
-                                        slot.count--;
-                                        if (slot.count == 0)
-                                            slot.type = BlockType::Air;
+                                        BlockType toPlace = slot.type;
                                         world.set(nx, ny, nz, toPlace);
                                         markNeighborsDirty(nx, ny, nz);
                                     }
@@ -1890,6 +2600,7 @@ int main()
         player.vz *= 0.85f;
 
         updateNpc(npc, world, simDt);
+        updateLogic(world);
 
         glClearColor(0.55f, 0.75f, 0.95f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1951,6 +2662,9 @@ int main()
         // NPC blocky model
         drawNpcBlocky(npc);
 
+        // bouton 0/1 affiché directement sur le bloc proche du joueur
+        drawButtonStateLabels(world, player, 10.0f);
+
         Vec3 fwdCast = forwardVec(player.yaw, player.pitch);
         float eyeY = player.y + EYE_HEIGHT;
         HitInfo hit = raycast(world, player.x, eyeY, player.z, fwdCast.x, fwdCast.y, fwdCast.z, 8.0f);
@@ -1959,12 +2673,14 @@ int main()
             drawFaceHighlight(hit);
         }
 
+        HoverLabel hoverLabel;
         beginHud(winW, winH);
         if (!inventoryOpen && !pauseMenuOpen)
             drawCrosshair(winW, winH);
         drawInventoryBar(winW, winH, hotbarSlots, selected);
         if (inventoryOpen)
-            drawInventoryPanel(winW, winH, inventorySlots, hotbarSlots, pendingSlot, pendingIsHotbar, mouseX, mouseY);
+            drawInventoryPanel(winW, winH, inventorySlots, hotbarSlots, pendingSlot, pendingIsHotbar, mouseX, mouseY,
+                               hoverLabel);
         if (pauseMenuOpen)
         {
             PauseMenuLayout l = computePauseLayout(winW, winH);
@@ -1974,6 +2690,8 @@ int main()
                                          l.quitH);
             drawPauseMenu(winW, winH, l, hoverResume, hoverQuit);
         }
+        if (hoverLabel.valid)
+            drawTooltip(hoverLabel.x, hoverLabel.y, winW, winH, hoverLabel.text);
         endHud();
 
         SDL_GL_SwapWindow(window);
