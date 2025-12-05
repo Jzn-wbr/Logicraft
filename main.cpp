@@ -1413,7 +1413,8 @@ int main()
             }
             else if (player.vy > 0.0f)
             {
-                nextY = std::floor(player.y + PLAYER_HEIGHT) - PLAYER_HEIGHT - 0.001f;
+                // clamp just below the ceiling block the head hit
+                nextY = std::ceil(player.y + PLAYER_HEIGHT) - PLAYER_HEIGHT - 0.001f;
             }
             player.vy = 0.0f;
         }
