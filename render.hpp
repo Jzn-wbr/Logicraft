@@ -19,6 +19,7 @@ extern const int ATLAS_TILE_SIZE;
 extern std::map<BlockType, int> gBlockTile;
 extern int gAndTopTile;
 extern int gOrTopTile;
+extern int gNotTopTile;
 extern const std::map<char, std::array<uint8_t, 5>> FONT5x4;
 extern const int MAX_STACK;
 extern const int INV_COLS;

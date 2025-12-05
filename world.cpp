@@ -20,17 +20,18 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Glass, {"Glass", true, {0.82f, 0.93f, 0.98f}}},
     {BlockType::AndGate, {"AND", true, {0.18f, 0.7f, 0.32f}}},
     {BlockType::OrGate, {"OR", true, {0.92f, 0.56f, 0.18f}}},
+    {BlockType::NotGate, {"NOT", true, {0.45f, 0.25f, 0.7f}}},
     {BlockType::Led, {"LED", true, {0.95f, 0.9f, 0.2f}}},
     {BlockType::Button, {"Button", true, {0.6f, 0.2f, 0.2f}}},
     {BlockType::Wire, {"Wire", true, {0.55f, 0.55f, 0.58f}}},
 };
 
 const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
-                                       BlockType::Stone, BlockType::Glass};
-const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt,    BlockType::Grass, BlockType::Wood,
-                                                  BlockType::Stone,   BlockType::Glass, BlockType::AndGate,
-                                                  BlockType::OrGate,  BlockType::Led,   BlockType::Button,
-                                                  BlockType::Wire};
+                                       BlockType::Stone, BlockType::Glass, BlockType::NotGate};
+const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt,     BlockType::Grass, BlockType::Wood,
+                                                  BlockType::Stone,    BlockType::Glass, BlockType::AndGate,
+                                                  BlockType::OrGate,   BlockType::NotGate, BlockType::Led,
+                                                  BlockType::Button,   BlockType::Wire};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -276,7 +277,9 @@ void updateLogic(World &world)
     std::vector<uint8_t> next(total, 0);
     std::vector<uint8_t> sources(total, 0);
     std::vector<std::array<int, 3>> gateOutputs;
+    std::vector<std::array<int, 3>> notOutputs;
     gateOutputs.reserve(total / 16);
+    notOutputs.reserve(total / 16);
 
     auto idx = [&](int x, int y, int z)
     { return world.index(x, y, z); };
@@ -313,6 +316,14 @@ void updateLogic(World &world)
                     out = (inA || inB) ? 1 : 0;
                     if (out)
                         gateOutputs.push_back({x, y, z});
+                    break;
+                }
+                case BlockType::NotGate:
+                {
+                    int inA = powerAt(x + 1, y, z) ? 1 : 0; // input on +X
+                    out = inA ? 0 : 1;
+                    if (out)
+                        notOutputs.push_back({x, y, z});
                     break;
                 }
                 case BlockType::Button:
@@ -363,6 +374,28 @@ void updateLogic(World &world)
         int ox = g[0];
         int oy = g[1];
         int oz = g[2] + 1;
+        if (!world.inside(ox, oy, oz))
+            continue;
+        int outIdx = idx(ox, oy, oz);
+        BlockType outB = world.get(ox, oy, oz);
+        if (outB == BlockType::Wire)
+        {
+            if (next[outIdx] == 0)
+                next[outIdx] = 1;
+            queue.push_back(outIdx);
+        }
+        else
+        {
+            setPower(ox, oy, oz);
+        }
+    }
+
+    // NOT outputs go toward -X only (input on +X)
+    for (const auto &g : notOutputs)
+    {
+        int ox = g[0] - 1;
+        int oy = g[1];
+        int oz = g[2];
         if (!world.inside(ox, oy, oz))
             continue;
         int outIdx = idx(ox, oy, oz);

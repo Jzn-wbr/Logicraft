@@ -20,6 +20,7 @@ const int ATLAS_TILE_SIZE = 32;
 std::map<BlockType, int> gBlockTile;
 int gAndTopTile = 0;
 int gOrTopTile = 0;
+int gNotTopTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 5;
 const int INV_ROWS = 3;
@@ -279,6 +280,55 @@ void fillGateTileWithLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, co
     drawGateTopLabels(pix, texW, tileIdx, baseColor, gateLabel);
 }
 
+void fillNotGateTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
+                     int styleSeed)
+{
+    fillTile(pix, texW, tileIdx, baseColor, styleSeed);
+    auto toByte = [](float v, float mul)
+    {
+        return static_cast<uint8_t>(std::clamp(v * mul, 0.0f, 1.0f) * 255.0f);
+    };
+    uint8_t textR = 245, textG = 245, textB = 240;
+    uint8_t accentR = toByte(baseColor[0], 1.25f);
+    uint8_t accentG = toByte(baseColor[1], 1.25f);
+    uint8_t accentB = toByte(baseColor[2], 1.25f);
+    uint8_t bgR = toByte(baseColor[0], 0.55f);
+    uint8_t bgG = toByte(baseColor[1], 0.55f);
+    uint8_t bgB = toByte(baseColor[2], 0.55f);
+
+    int tileX = (tileIdx % ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int tileY = (tileIdx / ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int centerY = ATLAS_TILE_SIZE / 2;
+
+    // single input bar on left
+    fillRect(pix, texW, tileX + 2, tileY + centerY - 2, 10, 4, accentR, accentG, accentB, 255);
+    // output bar on right
+    fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - 12, tileY + centerY - 2, 10, 4, accentR, accentG, accentB, 255);
+    // small triangle body
+    for (int i = 0; i < 8; ++i)
+    {
+        int y = centerY - 6 + i;
+        int width = 8 + i * 2;
+        int startX = (ATLAS_TILE_SIZE - width) / 2;
+        fillRect(pix, texW, tileX + startX, tileY + y, width, 1, accentR, accentG, accentB, 255);
+    }
+    // bubble inversion
+    fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - 18, tileY + centerY - 4, 8, 8, textR, textG, textB, 255);
+
+    // labels
+    int scale = 1;
+    int inWidth = tinyTextWidthOnTile("IN", scale);
+    int outWidth = tinyTextWidthOnTile("OUT", scale);
+    fillRect(pix, texW, tileX + 2, tileY + ATLAS_TILE_SIZE - 9, inWidth + 4, 7, bgR, bgG, bgB, 255);
+    fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - outWidth - 6, tileY + 2, outWidth + 4, 7, bgR, bgG, bgB, 255);
+    blitTinyTextToTile(pix, texW, tileIdx, 4, ATLAS_TILE_SIZE - 8, "IN", scale, textR, textG, textB, 255);
+    blitTinyTextToTile(pix, texW, tileIdx, ATLAS_TILE_SIZE - outWidth - 4, 4, "OUT", scale, textR, textG, textB, 255);
+    int notW = tinyTextWidthOnTile("NOT", scale);
+    fillRect(pix, texW, tileX + (ATLAS_TILE_SIZE - notW) / 2 - 2, tileY + centerY - 6, notW + 4, 7, bgR, bgG, bgB, 255);
+    blitTinyTextToTile(pix, texW, tileIdx, (ATLAS_TILE_SIZE - notW) / 2, centerY - 5, "NOT", scale, textR, textG, textB,
+                       255);
+}
+
 GLuint loadTextureFromBMP(const std::string &path)
 {
     SDL_Surface *surf = SDL_LoadBMP(path.c_str());
@@ -310,11 +360,15 @@ GLuint loadTextureFromBMP(const std::string &path)
 
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::Led, 12}, {BlockType::Button, 13}, {BlockType::Wire, 14}};
+    gBlockTile = {{BlockType::Grass, 0},    {BlockType::Dirt, 1},   {BlockType::Stone, 2},   {BlockType::Wood, 3},
+                  {BlockType::Leaves, 4},   {BlockType::Water, 5},  {BlockType::Plank, 6},   {BlockType::Sand, 7},
+                  {BlockType::Air, 8},      {BlockType::Glass, 9},  {BlockType::AndGate, 10}, {BlockType::OrGate, 11},
+                  {BlockType::NotGate, 12}, {BlockType::Led, 13},   {BlockType::Button, 14},  {BlockType::Wire, 15}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
     gAndTopTile = nextTile++;
     gOrTopTile = nextTile++;
+    gNotTopTile = nextTile++;
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
     int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
@@ -348,8 +402,10 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Led], base(BlockType::Led), 17);
     fillTile(pixels, texW, gBlockTile[BlockType::Button], base(BlockType::Button), 18);
     fillTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire), 19);
+    fillTile(pixels, texW, gBlockTile[BlockType::NotGate], base(BlockType::NotGate), 20);
     fillGateTileWithLabels(pixels, texW, gAndTopTile, base(BlockType::AndGate), 15, "AND");
     fillGateTileWithLabels(pixels, texW, gOrTopTile, base(BlockType::OrGate), 16, "OR");
+    fillNotGateTile(pixels, texW, gNotTopTile, base(BlockType::NotGate), 15);
 
     if (gAtlasTex == 0)
     {
@@ -538,6 +594,8 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             return gAndTopTile;
                         if (b == BlockType::OrGate)
                             return gOrTopTile;
+                        if (b == BlockType::NotGate)
+                            return gNotTopTile;
                     }
                     return tIdx;
                 };
@@ -551,6 +609,15 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                         if (!world.inside(xx, yy, zz))
                             return false;
                         BlockType nb = world.get(xx, yy, zz);
+                        if (nb == BlockType::NotGate)
+                        {
+                            // Only connect on input (+X) or output (-X) sides (input right, output left)
+                            if (dx == 1)
+                                return true; // input side
+                            if (dx == -1)
+                                return true; // output side
+                            return false;
+                        }
                         return nb == BlockType::Wire || nb == BlockType::Button || nb == BlockType::Led ||
                                nb == BlockType::AndGate || nb == BlockType::OrGate;
                     };

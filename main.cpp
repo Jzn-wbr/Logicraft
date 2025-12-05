@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstring>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -539,6 +540,9 @@ const std::map<char, std::array<uint8_t, 5>> FONT5x4 = {
     {'Y', {0b1001, 0b1001, 0b0110, 0b0100, 0b0100}},
 };
 
+// Forward decl for slot icon rendering
+void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize);
+
 void drawInventoryBar(int winW, int winH, const std::vector<ItemStack> &hotbar, int selected)
 {
     const int slotCount = static_cast<int>(HOTBAR.size());
@@ -572,10 +576,11 @@ void drawInventoryBar(int winW, int winH, const std::vector<ItemStack> &hotbar, 
         float alpha = hotbar[i].count > 0 ? 0.95f : 0.35f;
         drawQuad(x, y, slotSize, slotSize, col[0], col[1], col[2], alpha);
         drawOutline(x, y, slotSize, slotSize, 0.0f, 0.0f, 0.0f, 0.45f, 2.0f);
+        drawSlotIcon(hotbar[i], x, y, slotSize);
 
         // stack count
         int count = hotbar[i].count;
-        drawNumber(x + slotSize - 6.0f, y + slotSize - 24.0f, count, 10.0f, 1.0f, 0.98f, 0.9f, 0.95f);
+        drawNumber(x + slotSize - 4.0f, y + slotSize - 16.0f, count, 10.0f, 0.0f, 0.0f, 0.0f, 1.0f);
 
         // selection glow
         if (i == selected)
@@ -757,6 +762,103 @@ void drawButtonStateLabels(const World &world, const Player &player, float radiu
         }
     }
 }
+inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize)
+{
+    if (slot.count == 0)
+        return;
+
+    float cx = x + slotSize * 0.5f;
+    float cy = y + slotSize * 0.5f;
+
+    switch (slot.type)
+    {
+    case BlockType::Led:
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glBegin(GL_LINE_LOOP);
+        glVertex2f(x + slotSize * 0.25f, y + slotSize * 0.25f);
+        glVertex2f(x + slotSize * 0.25f, y + slotSize * 0.75f);
+        glVertex2f(x + slotSize * 0.65f, y + slotSize * 0.5f);
+        glEnd();
+        glBegin(GL_LINES);
+        glVertex2f(x + slotSize * 0.05f, y + slotSize * 0.5f);
+        glVertex2f(x + slotSize * 0.25f, y + slotSize * 0.5f);
+        glVertex2f(x + slotSize * 0.65f, y + slotSize * 0.5f);
+        glVertex2f(x + slotSize * 0.95f, y + slotSize * 0.5f);
+        glVertex2f(x + slotSize * 0.72f, y + slotSize * 0.2f);
+        glVertex2f(x + slotSize * 0.72f, y + slotSize * 0.8f);
+        glEnd();
+        glBegin(GL_LINES);
+        glVertex2f(x + slotSize * 0.55f, y + slotSize * 0.35f);
+        glVertex2f(x + slotSize * 0.4f, y + slotSize * 0.18f);
+        glVertex2f(x + slotSize * 0.52f, y + slotSize * 0.32f);
+        glVertex2f(x + slotSize * 0.42f, y + slotSize * 0.26f);
+        glVertex2f(x + slotSize * 0.6f, y + slotSize * 0.2f);
+        glVertex2f(x + slotSize * 0.45f, y + slotSize * 0.05f);
+        glVertex2f(x + slotSize * 0.57f, y + slotSize * 0.17f);
+        glVertex2f(x + slotSize * 0.47f, y + slotSize * 0.11f);
+        glEnd();
+        break;
+    case BlockType::Button:
+        drawQuad(cx - slotSize * 0.25f, cy - slotSize * 0.12f, slotSize * 0.5f, slotSize * 0.24f, 0.75f, 0.25f,
+                 0.25f, 0.9f);
+        drawOutline(cx - slotSize * 0.25f, cy - slotSize * 0.12f, slotSize * 0.5f, slotSize * 0.24f, 0.1f, 0.1f,
+                    0.1f, 0.9f, 2.0f);
+        break;
+    case BlockType::OrGate:
+    case BlockType::AndGate:
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glLineWidth(2.0f);
+        float pad = slotSize * 0.18f;
+        drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
+        const char *label = (slot.type == BlockType::AndGate) ? "AND" : "OR";
+        float txtSize = 1.6f;
+        float textWidth = static_cast<float>(std::strlen(label)) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
+        float textX = x + (slotSize - textWidth) * 0.5f;
+        float textY = y + slotSize * 0.36f;
+        drawTextTiny(textX, textY, txtSize, label, 1.0f, 1.0f, 1.0f, 1.0f);
+        glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::Wire:
+        glColor4f(1.0f, 0.9f, 0.3f, 0.95f);
+        glBegin(GL_LINE_STRIP);
+        glVertex2f(x + slotSize * 0.15f, y + slotSize * 0.65f);
+        glVertex2f(x + slotSize * 0.35f, y + slotSize * 0.55f);
+        glVertex2f(x + slotSize * 0.55f, y + slotSize * 0.7f);
+        glVertex2f(x + slotSize * 0.82f, y + slotSize * 0.4f);
+        glEnd();
+        break;
+    case BlockType::NotGate:
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glLineWidth(2.0f);
+        float padNot = slotSize * 0.18f;
+        drawOutline(x + padNot, y + padNot, slotSize - padNot * 2, slotSize - padNot * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
+        float txtSize = 1.6f;
+        float textWidth = static_cast<float>(std::strlen("NOT")) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
+        float textX = x + (slotSize - textWidth) * 0.5f;
+        float textY = y + slotSize * 0.4f;
+        drawTextTiny(textX, textY, txtSize, "NOT", 1.0f, 1.0f, 1.0f, 1.0f);
+        glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::Air:
+    case BlockType::Grass:
+    case BlockType::Dirt:
+    case BlockType::Stone:
+    case BlockType::Wood:
+    case BlockType::Leaves:
+    case BlockType::Water:
+    case BlockType::Plank:
+    case BlockType::Sand:
+    case BlockType::Glass:
+        break;
+    default:
+        break;
+    }
+}
+
 void drawSlotBox(float x, float y, float slotSize, const ItemStack &slot, bool selected, bool hovered)
 {
     auto col = BLOCKS.at(slot.count > 0 ? slot.type : BlockType::Air).color;
@@ -765,65 +867,9 @@ void drawSlotBox(float x, float y, float slotSize, const ItemStack &slot, bool s
     drawOutline(x - 4.0f, y - 4.0f, slotSize + 8.0f, slotSize + 8.0f, 1.0f, 1.0f, 1.0f, 0.08f, 2.0f);
     drawQuad(x, y, slotSize, slotSize, col[0], col[1], col[2], alpha);
     drawOutline(x, y, slotSize, slotSize, 0.0f, 0.0f, 0.0f, 0.45f, 2.0f);
+    drawSlotIcon(slot, x, y, slotSize);
     if (slot.count > 0)
-    {
-        const char *lbl = "";
-        switch (slot.type)
-        {
-        case BlockType::Grass:
-            lbl = "GR";
-            break;
-        case BlockType::Dirt:
-            lbl = "DI";
-            break;
-        case BlockType::Stone:
-            lbl = "ST";
-            break;
-        case BlockType::Wood:
-            lbl = "WD";
-            break;
-        case BlockType::Leaves:
-            lbl = "LE";
-            break;
-        case BlockType::Water:
-            lbl = "WA";
-            break;
-        case BlockType::Plank:
-            lbl = "PL";
-            break;
-        case BlockType::Sand:
-            lbl = "SA";
-            break;
-        case BlockType::Glass:
-            lbl = "GL";
-            break;
-        case BlockType::AndGate:
-            lbl = "AND";
-            break;
-        case BlockType::OrGate:
-            lbl = "OR";
-            break;
-        case BlockType::Led:
-            lbl = "LED";
-            break;
-        case BlockType::Button:
-            lbl = "BTN";
-            break;
-        case BlockType::Wire:
-            lbl = "WIR";
-            break;
-        default:
-            lbl = "";
-            break;
-        }
-        if (lbl[0] != '\0')
-        {
-            float txtSize = 8.5f;
-            drawTextTiny(x + 6.0f, y + 6.0f, txtSize, lbl, 1.0f, 1.0f, 1.0f, 0.92f);
-        }
-    }
-    if (slot.count > 0)
-        drawNumber(x + slotSize - 6.0f, y + slotSize - 24.0f, slot.count, 10.0f, 1.0f, 0.98f, 0.9f, 0.95f);
+        drawNumber(x + slotSize - 4.0f, y + slotSize - 16.0f, slot.count, 10.0f, 0.0f, 0.0f, 0.0f, 1.0f);
     if (selected)
         drawOutline(x - 6.0f, y - 6.0f, slotSize + 12.0f, slotSize + 12.0f, 1.0f, 0.9f, 0.2f, 0.9f, 3.5f);
     else if (hovered)
@@ -1186,9 +1232,11 @@ int main()
                     player.y = world.surfaceY(static_cast<int>(player.x), static_cast<int>(player.z)) + 0.2f;
                     markAllChunksDirty();
                 }
-                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_5)
+                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_6)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
+                    if (selected >= static_cast<int>(hotbarSlots.size()))
+                        selected = static_cast<int>(hotbarSlots.size()) - 1;
                 }
                 else if ((e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
                 {

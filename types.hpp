@@ -21,6 +21,7 @@ enum class BlockType
     Glass,
     AndGate,
     OrGate,
+    NotGate,
     Led,
     Button,
     Wire
