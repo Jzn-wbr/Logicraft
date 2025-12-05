@@ -26,7 +26,8 @@ enum class BlockType
     Leaves,
     Water,
     Plank,
-    Sand
+    Sand,
+    Glass
 };
 
 struct Player
@@ -39,6 +40,19 @@ struct Player
     float vx = 0.0f;
     float vy = 0.0f;
     float vz = 0.0f;
+};
+
+struct NPC
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float width = 0.8f;
+    float height = 1.9f;
+    GLuint texture = 0;
+    float dirX = 0.0f;
+    float dirZ = 0.0f;
+    float timeUntilTurn = 0.0f;
 };
 
 struct BlockInfo
@@ -54,20 +68,30 @@ struct ItemStack
     int count = 0;
 };
 
+struct PauseMenuLayout
+{
+    float panelX = 0.0f, panelY = 0.0f, panelW = 0.0f, panelH = 0.0f;
+    float resumeX = 0.0f, resumeY = 0.0f, resumeW = 0.0f, resumeH = 0.0f;
+    float quitX = 0.0f, quitY = 0.0f, quitW = 0.0f, quitH = 0.0f;
+};
+
 static const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Air, {"Air", false, {0.7f, 0.85f, 1.0f}}},
     {BlockType::Grass, {"Grass", true, {0.2f, 0.7f, 0.2f}}},
     {BlockType::Dirt, {"Dirt", true, {0.45f, 0.25f, 0.1f}}},
     {BlockType::Stone, {"Stone", true, {0.5f, 0.5f, 0.5f}}},
-    {BlockType::Wood, {"Wood", true, {0.55f, 0.35f, 0.2f}}},
+    {BlockType::Wood, {"Wood", true, {0.8f, 0.65f, 0.45f}}},
     {BlockType::Leaves, {"Leaves", true, {0.25f, 0.6f, 0.25f}}},
     {BlockType::Water, {"Water", false, {0.2f, 0.4f, 0.9f}}},
     {BlockType::Plank, {"Plank", true, {0.75f, 0.6f, 0.4f}}},
     {BlockType::Sand, {"Sand", true, {0.9f, 0.8f, 0.6f}}},
+    {BlockType::Glass, {"Glass", true, {0.82f, 0.93f, 0.98f}}},
 };
 
-static const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Stone, BlockType::Wood,
-                                              BlockType::Plank, BlockType::Sand};
+static const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
+                                              BlockType::Stone, BlockType::Glass};
+static const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
+                                                         BlockType::Stone, BlockType::Glass};
 
 struct Vertex
 {
@@ -273,7 +297,12 @@ HitInfo raycast(const World &world, float ox, float oy, float oz, float dx, floa
     return {0, 0, 0, 0, 0, 0, false};
 }
 
-bool isTransparent(BlockType b) { return !isSolid(b); }
+bool isTransparent(BlockType b)
+{
+    if (b == BlockType::Glass)
+        return true;
+    return !isSolid(b);
+}
 
 bool blockIntersectsPlayer(const Player &player, int bx, int by, int bz, float playerHeight)
 {
@@ -314,6 +343,50 @@ Vec3 forwardVec(float yaw, float pitch)
     float sy = std::sin(yaw);
     float cy = std::cos(yaw);
     return {sy * cp, sp, -cy * cp};
+}
+
+// RNG ultra simple et peu coûteux, suffisant pour un déplacement bête.
+float cheapRand01()
+{
+    static uint32_t state = 0x12345678u;
+    state = 1664525u * state + 1013904223u;
+    return static_cast<float>((state >> 8) & 0x00FFFFFFu) * (1.0f / 16777215.0f);
+}
+
+void updateNpc(NPC &npc, const World &world, float dt)
+{
+    npc.timeUntilTurn -= dt;
+    if (npc.timeUntilTurn <= 0.0f)
+    {
+        // Décide rarement un mouvement, sinon il reste immobile pour être moins présent.
+        if (cheapRand01() < 0.4f)
+        {
+            float angle = cheapRand01() * 6.2831853f; // 2pi
+            npc.dirX = std::cos(angle);
+            npc.dirZ = std::sin(angle);
+        }
+        else
+        {
+            npc.dirX = 0.0f;
+            npc.dirZ = 0.0f;
+        }
+        npc.timeUntilTurn = 2.5f + cheapRand01() * 3.5f; // reste longtemps dans le même état
+    }
+
+    const float npcSpeed = 1.2f;
+    float nextX = npc.x + npc.dirX * npcSpeed * dt;
+    float nextZ = npc.z + npc.dirZ * npcSpeed * dt;
+    nextX = std::clamp(nextX, 1.0f, static_cast<float>(world.getWidth() - 2));
+    nextZ = std::clamp(nextZ, 1.0f, static_cast<float>(world.getDepth() - 2));
+
+    int tileX = static_cast<int>(std::floor(nextX));
+    int tileZ = static_cast<int>(std::floor(nextZ));
+    if (world.inside(tileX, 0, tileZ))
+    {
+        npc.x = nextX;
+        npc.z = nextZ;
+        npc.y = static_cast<float>(world.surfaceY(tileX, tileZ));
+    }
 }
 
 void drawBlockFaces(const World &world, int x, int y, int z, float s, const std::array<float, 3> &color)
@@ -606,6 +679,139 @@ void drawFaceHighlight(const HitInfo &hit)
     glEnd();
 }
 
+void drawNpcBlocky(const NPC &npc)
+{
+    // Blocks are quarter-size vs world blocks.
+    const float s = 0.25f;
+    float baseY = npc.y;
+
+    auto drawColoredCube = [](float cx, float cy, float cz, float size, float r, float g, float b)
+    {
+        float hx = size * 0.5f;
+        float x0 = cx - hx, x1 = cx + hx;
+        float y0 = cy - hx, y1 = cy + hx;
+        float z0 = cz - hx, z1 = cz + hx;
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(r, g, b);
+        glBegin(GL_QUADS);
+        // front
+        glVertex3f(x0, y0, z1);
+        glVertex3f(x1, y0, z1);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x0, y1, z1);
+        // back
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x0, y1, z0);
+        glVertex3f(x1, y1, z0);
+        // left
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x0, y0, z1);
+        glVertex3f(x0, y1, z1);
+        glVertex3f(x0, y1, z0);
+        // right
+        glVertex3f(x1, y0, z1);
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x1, y1, z0);
+        glVertex3f(x1, y1, z1);
+        // top
+        glVertex3f(x0, y1, z1);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x1, y1, z0);
+        glVertex3f(x0, y1, z0);
+        // bottom
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x1, y0, z1);
+        glVertex3f(x0, y0, z1);
+        glEnd();
+    };
+
+    auto drawHeadCubeFaceOnly = [](float cx, float cy, float cz, float size, GLuint tex)
+    {
+        float hx = size * 0.5f;
+        float x0 = cx - hx, x1 = cx + hx;
+        float y0 = cy - hx, y1 = cy + hx;
+        float z0 = cz - hx, z1 = cz + hx;
+
+        // colored faces
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.9f, 0.9f, 0.9f);
+        glBegin(GL_QUADS);
+        // back
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x0, y1, z0);
+        glVertex3f(x1, y1, z0);
+        // left
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x0, y0, z1);
+        glVertex3f(x0, y1, z1);
+        glVertex3f(x0, y1, z0);
+        // right
+        glVertex3f(x1, y0, z1);
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x1, y1, z0);
+        glVertex3f(x1, y1, z1);
+        // top
+        glVertex3f(x0, y1, z1);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x1, y1, z0);
+        glVertex3f(x0, y1, z0);
+        // bottom
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x1, y0, z1);
+        glVertex3f(x0, y0, z1);
+        glEnd();
+
+        // front face textured (pointing +Z)
+        if (tex != 0)
+        {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, tex);
+            glColor3f(1.0f, 1.0f, 1.0f);
+        }
+        else
+        {
+            glDisable(GL_TEXTURE_2D);
+            glColor3f(0.8f, 0.8f, 0.8f);
+        }
+        glBegin(GL_QUADS);
+        glTexCoord2f(0.0f, 1.0f);
+        glVertex3f(x0, y0, z1);
+        glTexCoord2f(1.0f, 1.0f);
+        glVertex3f(x1, y0, z1);
+        glTexCoord2f(1.0f, 0.0f);
+        glVertex3f(x1, y1, z1);
+        glTexCoord2f(0.0f, 0.0f);
+        glVertex3f(x0, y1, z1);
+        glEnd();
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+    };
+
+    // Stack of 4 cubes (height s each)
+    for (int i = 0; i < 4; ++i)
+    {
+        float cy = baseY + s * (0.5f + i);
+        if (i < 3)
+        {
+            drawColoredCube(npc.x, cy, npc.z, s, 0.2f, 0.35f, 0.55f); // body color
+        }
+        else
+        {
+            drawHeadCubeFaceOnly(npc.x, cy, npc.z, s, npc.texture);
+        }
+    }
+
+    // Arms on the 3rd block height (index 2, y center at s*(0.5+2))
+    float armY = baseY + s * (0.5f + 2);
+    float armOffset = s * 0.6f;
+    drawColoredCube(npc.x - armOffset, armY, npc.z, s, 0.2f, 0.35f, 0.55f);
+    drawColoredCube(npc.x + armOffset, armY, npc.z, s, 0.2f, 0.35f, 0.55f);
+}
+
 // HUD helpers for 2D overlay
 void beginHud(int w, int h)
 {
@@ -760,15 +966,46 @@ void fillTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array
             uint8_t B = static_cast<uint8_t>(b * 255.0f);
             uint8_t A = 255;
             if (styleSeed == 99)
-                A = 180;
+                A = 180; // eau semi-transparente
+            else if (styleSeed == 88)
+                A = 120; // verre transparent
             writePixel(pix, texW, x0 + x, y0 + y, R, G, B, A);
         }
     }
 }
 
+GLuint loadTextureFromBMP(const std::string &path)
+{
+    SDL_Surface *surf = SDL_LoadBMP(path.c_str());
+    if (!surf)
+    {
+        std::cerr << "Failed to load BMP \"" << path << "\": " << SDL_GetError() << "\n";
+        return 0;
+    }
+    SDL_Surface *rgba = SDL_ConvertSurfaceFormat(surf, SDL_PIXELFORMAT_ABGR8888, 0);
+    SDL_FreeSurface(surf);
+    if (!rgba)
+    {
+        std::cerr << "Failed to convert BMP \"" << path << "\" to RGBA: " << SDL_GetError() << "\n";
+        return 0;
+    }
+
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba->w, rgba->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba->pixels);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    SDL_FreeSurface(rgba);
+    return tex;
+}
+
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}};
+    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}};
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
     int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
@@ -786,6 +1023,7 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Plank], base(BlockType::Plank), 0);
     fillTile(pixels, texW, gBlockTile[BlockType::Sand], base(BlockType::Sand), 2);
     fillTile(pixels, texW, gBlockTile[BlockType::Air], {0.7f, 0.85f, 1.0f}, 6);
+    fillTile(pixels, texW, gBlockTile[BlockType::Glass], {0.85f, 0.9f, 0.95f}, 88);
 
     if (gAtlasTex == 0)
     {
@@ -855,6 +1093,72 @@ void drawCrosshair(int winW, int winH)
     const float thick = 2.0f;
     drawQuad(cx - len, cy - thick * 0.5f, len * 2.0f, thick, 1.0f, 1.0f, 1.0f, 0.9f);
     drawQuad(cx - thick * 0.5f, cy - len, thick, len * 2.0f, 1.0f, 1.0f, 1.0f, 0.9f);
+}
+
+PauseMenuLayout computePauseLayout(int winW, int winH)
+{
+    PauseMenuLayout l;
+    l.panelW = 360.0f;
+    l.panelH = 220.0f;
+    l.panelX = (winW - l.panelW) * 0.5f;
+    l.panelY = (winH - l.panelH) * 0.5f;
+
+    l.resumeW = l.panelW - 80.0f;
+    l.resumeH = 50.0f;
+    l.resumeX = l.panelX + (l.panelW - l.resumeW) * 0.5f;
+    l.resumeY = l.panelY + 60.0f;
+
+    l.quitW = l.resumeW;
+    l.quitH = 50.0f;
+    l.quitX = l.resumeX;
+    l.quitY = l.resumeY + 70.0f;
+    return l;
+}
+
+void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResume, bool hoverQuit)
+{
+    drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.55f);
+    drawQuad(l.panelX, l.panelY, l.panelW, l.panelH, 0.05f, 0.05f, 0.08f, 0.92f);
+    drawOutline(l.panelX, l.panelY, l.panelW, l.panelH, 1.0f, 1.0f, 1.0f, 0.08f, 3.0f);
+
+    auto drawButton = [](float x, float y, float w, float h, float r, float g, float b, bool hover)
+    {
+        float a = hover ? 0.95f : 0.8f;
+        drawQuad(x, y, w, h, r, g, b, a);
+        drawOutline(x, y, w, h, 0.0f, 0.0f, 0.0f, 0.45f, 3.0f);
+    };
+
+    drawButton(l.resumeX, l.resumeY, l.resumeW, l.resumeH, 0.16f, 0.55f, 0.25f, hoverResume);
+    drawButton(l.quitX, l.quitY, l.quitW, l.quitH, 0.65f, 0.18f, 0.12f, hoverQuit);
+
+    // resume icon (triangle play)
+    glColor4f(1.0f, 1.0f, 1.0f, hoverResume ? 0.95f : 0.85f);
+    glBegin(GL_TRIANGLES);
+    float rx0 = l.resumeX + l.resumeW * 0.36f;
+    float ry0 = l.resumeY + l.resumeH * 0.22f;
+    float rx1 = l.resumeX + l.resumeW * 0.36f;
+    float ry1 = l.resumeY + l.resumeH * 0.78f;
+    float rx2 = l.resumeX + l.resumeW * 0.74f;
+    float ry2 = l.resumeY + l.resumeH * 0.5f;
+    glVertex2f(rx0, ry0);
+    glVertex2f(rx1, ry1);
+    glVertex2f(rx2, ry2);
+    glEnd();
+
+    // quit icon (X)
+    glLineWidth(4.0f);
+    glColor4f(1.0f, 1.0f, 1.0f, hoverQuit ? 0.95f : 0.85f);
+    float qx0 = l.quitX + l.quitW * 0.3f;
+    float qy0 = l.quitY + l.quitH * 0.3f;
+    float qx1 = l.quitX + l.quitW * 0.7f;
+    float qy1 = l.quitY + l.quitH * 0.7f;
+    glBegin(GL_LINES);
+    glVertex2f(qx0, qy0);
+    glVertex2f(qx1, qy1);
+    glVertex2f(qx0, qy1);
+    glVertex2f(qx1, qy0);
+    glEnd();
+    glLineWidth(1.0f);
 }
 
 bool pointInRect(float mx, float my, float x, float y, float w, float h)
@@ -1179,7 +1483,7 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
 }
 void updateTitle(SDL_Window *window)
 {
-    std::string title = "MiniCraft 3D";
+    std::string title = "Messercraft";
     SDL_SetWindowTitle(window, title.c_str());
 }
 
@@ -1235,6 +1539,11 @@ int main()
     }
 
     createAtlasTexture();
+    GLuint npcTexture = loadTextureFromBMP("images/npc_head.bmp");
+    if (npcTexture == 0)
+    {
+        std::cerr << "Could not load NPC texture (images/npc_head.bmp). Using flat color.\n";
+    }
 
     World world(WIDTH, HEIGHT, DEPTH);
     CHUNK_X_COUNT = (WIDTH + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -1249,6 +1558,15 @@ int main()
     player.x = WIDTH / 2.0f;
     player.z = DEPTH / 2.0f;
     player.y = world.surfaceY(static_cast<int>(player.x), static_cast<int>(player.z)) + 0.2f;
+    NPC npc;
+    npc.texture = npcTexture;
+    npc.width = 0.95f;
+    npc.height = 1.9f;
+    int npcGridX = static_cast<int>(player.x) + 2;
+    int npcGridZ = static_cast<int>(player.z) + 2;
+    npc.x = npcGridX + 0.5f;
+    npc.z = npcGridZ + 0.5f;
+    npc.y = world.surfaceY(npcGridX, npcGridZ);
 
     int selected = 0;
     std::vector<ItemStack> hotbarSlots(HOTBAR.size());
@@ -1260,18 +1578,17 @@ int main()
     std::vector<ItemStack> inventorySlots(INV_COLS * INV_ROWS);
     {
         int idx = 0;
-        for (const auto &kv : BLOCKS)
+        for (BlockType b : INVENTORY_ALLOWED)
         {
-            if (kv.first == BlockType::Air)
-                continue;
             if (idx >= static_cast<int>(inventorySlots.size()))
                 break;
-            inventorySlots[idx].type = kv.first;
+            inventorySlots[idx].type = b;
             inventorySlots[idx].count = 32;
             ++idx;
         }
     }
     bool inventoryOpen = false;
+    bool pauseMenuOpen = false;
     int pendingSlot = -1;
     bool pendingIsHotbar = false;
     int mouseX = 0, mouseY = 0;
@@ -1288,7 +1605,7 @@ int main()
     SDL_ShowCursor(SDL_FALSE);
 
     std::cout << "Commandes: WASD/ZQSD deplacement, souris pour la camera, clic gauche miner, clic droit placer, "
-                 "1-5 changer de bloc, Space saut, Shift descendre, R regen, X save (non implemente), Esc quitter.\n";
+                 "1-5 changer de bloc, Space saut, Shift descendre, R regen, X save (non implemente), Esc menu pause.\n";
 
     int winW = 1280, winH = 720;
     setup3D(winW, winH);
@@ -1305,7 +1622,7 @@ int main()
         }
 
         // Applique la souris liss??e ici pour stabiliser la camera
-        if (!inventoryOpen)
+        if (!inventoryOpen && !pauseMenuOpen)
         {
             const float sensitivity = 0.011f;
             player.yaw += smoothDX * sensitivity;
@@ -1331,9 +1648,23 @@ int main()
             {
                 if (e.key.keysym.sym == SDLK_ESCAPE)
                 {
-                    running = false;
+                    if (pauseMenuOpen)
+                    {
+                        pauseMenuOpen = false;
+                        SDL_SetRelativeMouseMode(SDL_TRUE);
+                        SDL_ShowCursor(SDL_FALSE);
+                    }
+                    else
+                    {
+                        pauseMenuOpen = true;
+                        inventoryOpen = false;
+                        pendingSlot = -1;
+                        SDL_SetRelativeMouseMode(SDL_FALSE);
+                        SDL_ShowCursor(SDL_TRUE);
+                        smoothDX = smoothDY = 0.0f;
+                    }
                 }
-                else if (e.key.keysym.sym == SDLK_e)
+                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen)
                 {
                     inventoryOpen = !inventoryOpen;
                     pendingSlot = -1;
@@ -1367,7 +1698,7 @@ int main()
             {
                 mouseX = e.motion.x;
                 mouseY = e.motion.y;
-                if (!inventoryOpen)
+                if (!inventoryOpen && !pauseMenuOpen)
                 {
                     // Filtre de la souris pour lisser les mouvements et limiter les saccades
                     smoothDX = smoothDX * 0.6f + static_cast<float>(e.motion.xrel) * 0.4f;
@@ -1382,7 +1713,26 @@ int main()
             }
             else if (e.type == SDL_MOUSEBUTTONDOWN)
             {
-                if (inventoryOpen)
+                if (pauseMenuOpen)
+                {
+                    PauseMenuLayout l = computePauseLayout(winW, winH);
+                    bool hoverResume = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.resumeX,
+                                                   l.resumeY, l.resumeW, l.resumeH);
+                    bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY,
+                                                 l.quitW, l.quitH);
+                    if (hoverQuit)
+                    {
+                        running = false;
+                    }
+                    else if (hoverResume)
+                    {
+                        pauseMenuOpen = false;
+                        SDL_SetRelativeMouseMode(SDL_TRUE);
+                        SDL_ShowCursor(SDL_FALSE);
+                        smoothDX = smoothDY = 0.0f;
+                    }
+                }
+                else if (inventoryOpen)
                 {
                     if (e.button.button == SDL_BUTTON_LEFT)
                     {
@@ -1455,33 +1805,35 @@ int main()
             }
         }
 
+        float simDt = pauseMenuOpen ? 0.0f : dt;
+
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         Vec3 fwd = forwardVec(player.yaw, player.pitch);
         Vec3 right{std::cos(player.yaw), 0.0f, std::sin(player.yaw)};
         float moveSpeed = SPEED * (sprinting ? SPRINT_MULT : 1.0f);
         bool forwardHeld = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_Z];
 
-        if (!inventoryOpen)
+        if (!inventoryOpen && !pauseMenuOpen)
         {
             if (forwardHeld)
             {
-                player.vx += fwd.x * moveSpeed * dt;
-                player.vz += fwd.z * moveSpeed * dt;
+                player.vx += fwd.x * moveSpeed * simDt;
+                player.vz += fwd.z * moveSpeed * simDt;
             }
             if (keys[SDL_SCANCODE_S])
             {
-                player.vx -= fwd.x * moveSpeed * dt;
-                player.vz -= fwd.z * moveSpeed * dt;
+                player.vx -= fwd.x * moveSpeed * simDt;
+                player.vz -= fwd.z * moveSpeed * simDt;
             }
             if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_Q])
             {
-                player.vx -= right.x * moveSpeed * dt;
-                player.vz -= right.z * moveSpeed * dt;
+                player.vx -= right.x * moveSpeed * simDt;
+                player.vz -= right.z * moveSpeed * simDt;
             }
             if (keys[SDL_SCANCODE_D])
             {
-                player.vx += right.x * moveSpeed * dt;
-                player.vz += right.z * moveSpeed * dt;
+                player.vx += right.x * moveSpeed * simDt;
+                player.vz += right.z * moveSpeed * simDt;
             }
             if (keys[SDL_SCANCODE_SPACE])
             {
@@ -1492,13 +1844,13 @@ int main()
                 player.vy = -JUMP;
             }
         }
-        if (!forwardHeld || inventoryOpen)
+        if (!forwardHeld || inventoryOpen || pauseMenuOpen)
         {
             sprinting = false;
         }
-        player.vy += GRAVITY * dt;
+        player.vy += GRAVITY * simDt;
 
-        float nextY = player.y + player.vy * dt;
+        float nextY = player.y + player.vy * simDt;
         nextY = std::clamp(nextY, PLAYER_HEIGHT * 0.5f, HEIGHT - 2.0f);
         if (collidesAt(world, player.x, nextY, player.z, PLAYER_HEIGHT))
         {
@@ -1513,7 +1865,7 @@ int main()
             player.vy = 0.0f;
         }
 
-        float nextX = player.x + player.vx * dt;
+        float nextX = player.x + player.vx * simDt;
         nextX = std::clamp(nextX, 1.0f, WIDTH - 2.0f);
         if (collidesAt(world, nextX, nextY, player.z, PLAYER_HEIGHT))
         {
@@ -1521,7 +1873,7 @@ int main()
             player.vx = 0.0f;
         }
 
-        float nextZ = player.z + player.vz * dt;
+        float nextZ = player.z + player.vz * simDt;
         nextZ = std::clamp(nextZ, 1.0f, DEPTH - 2.0f);
         if (collidesAt(world, nextX, nextY, nextZ, PLAYER_HEIGHT))
         {
@@ -1536,6 +1888,8 @@ int main()
         player.vx *= 0.85f;
         player.vy *= 0.85f;
         player.vz *= 0.85f;
+
+        updateNpc(npc, world, simDt);
 
         glClearColor(0.55f, 0.75f, 0.95f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1594,6 +1948,9 @@ int main()
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
 
+        // NPC blocky model
+        drawNpcBlocky(npc);
+
         Vec3 fwdCast = forwardVec(player.yaw, player.pitch);
         float eyeY = player.y + EYE_HEIGHT;
         HitInfo hit = raycast(world, player.x, eyeY, player.z, fwdCast.x, fwdCast.y, fwdCast.z, 8.0f);
@@ -1603,11 +1960,20 @@ int main()
         }
 
         beginHud(winW, winH);
-        if (!inventoryOpen)
+        if (!inventoryOpen && !pauseMenuOpen)
             drawCrosshair(winW, winH);
         drawInventoryBar(winW, winH, hotbarSlots, selected);
         if (inventoryOpen)
             drawInventoryPanel(winW, winH, inventorySlots, hotbarSlots, pendingSlot, pendingIsHotbar, mouseX, mouseY);
+        if (pauseMenuOpen)
+        {
+            PauseMenuLayout l = computePauseLayout(winW, winH);
+            bool hoverResume = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.resumeX, l.resumeY,
+                                           l.resumeW, l.resumeH);
+            bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY, l.quitW,
+                                         l.quitH);
+            drawPauseMenu(winW, winH, l, hoverResume, hoverQuit);
+        }
         endHud();
 
         SDL_GL_SwapWindow(window);
