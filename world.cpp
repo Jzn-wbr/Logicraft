@@ -320,7 +320,7 @@ void updateLogic(World &world)
                 }
                 case BlockType::NotGate:
                 {
-                    int inA = powerAt(x + 1, y, z) ? 1 : 0; // input on +X
+                    int inA = powerAt(x + 1, y, z) ? 1 : 0; // input on +X (right)
                     out = inA ? 0 : 1;
                     if (out)
                         notOutputs.push_back({x, y, z});

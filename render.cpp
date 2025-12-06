@@ -611,7 +611,7 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                         BlockType nb = world.get(xx, yy, zz);
                         if (nb == BlockType::NotGate)
                         {
-                            // Only connect on input (+X) or output (-X) sides (input right, output left)
+                            // Only connect on right (input) or left (output) sides
                             if (dx == 1)
                                 return true; // input side
                             if (dx == -1)

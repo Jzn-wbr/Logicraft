@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -21,6 +22,12 @@
 #include "render.hpp"
 #include "types.hpp"
 #include "world.hpp"
+
+void drawTextTiny(float x, float y, float size, const std::string &text, float r, float g, float b, float a);
+std::string stemFromPath(const std::string &path);
+extern bool gSaveInputFocus;
+extern std::vector<std::string> gSaveList;
+extern int gSaveIndex;
 
 Vec3 cross(const Vec3 &a, const Vec3 &b)
 {
@@ -520,17 +527,30 @@ void drawDigitBillboard(const Vec3 &pos, float size, int digit, const Vec3 &righ
 
 // ---------- Texture atlas generation ----------
 const std::map<char, std::array<uint8_t, 5>> FONT5x4 = {
+    {'0', {0b0110, 0b1001, 0b1001, 0b1001, 0b0110}},
+    {'1', {0b0100, 0b1100, 0b0100, 0b0100, 0b1110}},
+    {'2', {0b1110, 0b0001, 0b0110, 0b1000, 0b1111}},
+    {'3', {0b1110, 0b0001, 0b0110, 0b0001, 0b1110}},
+    {'4', {0b1001, 0b1001, 0b1111, 0b0001, 0b0001}},
+    {'5', {0b1111, 0b1000, 0b1110, 0b0001, 0b1110}},
+    {'6', {0b0111, 0b1000, 0b1110, 0b1001, 0b0110}},
+    {'7', {0b1111, 0b0001, 0b0010, 0b0100, 0b0100}},
+    {'8', {0b0110, 0b1001, 0b0110, 0b1001, 0b0110}},
+    {'9', {0b0110, 0b1001, 0b0111, 0b0001, 0b1110}},
     {'A', {0b0110, 0b1001, 0b1111, 0b1001, 0b1001}},
     {'B', {0b1110, 0b1001, 0b1110, 0b1001, 0b1110}},
     {'C', {0b0111, 0b1000, 0b1000, 0b1000, 0b0111}},
     {'D', {0b1110, 0b1001, 0b1001, 0b1001, 0b1110}},
     {'E', {0b1111, 0b1000, 0b1110, 0b1000, 0b1111}},
+    {'F', {0b1111, 0b1000, 0b1110, 0b1000, 0b1000}},
     {'G', {0b0111, 0b1000, 0b1011, 0b1001, 0b0111}},
     {'I', {0b1110, 0b0100, 0b0100, 0b0100, 0b1110}},
     {'L', {0b1000, 0b1000, 0b1000, 0b1000, 0b1111}},
+    {'M', {0b1001, 0b1101, 0b1011, 0b1001, 0b1001}},
     {'N', {0b1001, 0b1101, 0b1011, 0b1001, 0b1001}},
     {'O', {0b0110, 0b1001, 0b1001, 0b1001, 0b0110}},
     {'P', {0b1110, 0b1001, 0b1110, 0b1000, 0b1000}},
+    {'Q', {0b0110, 0b1001, 0b1001, 0b1010, 0b0111}},
     {'R', {0b1110, 0b1001, 0b1110, 0b1010, 0b1001}},
     {'S', {0b0111, 0b1000, 0b0110, 0b0001, 0b1110}},
     {'T', {0b1111, 0b0100, 0b0100, 0b0100, 0b0100}},
@@ -538,6 +558,8 @@ const std::map<char, std::array<uint8_t, 5>> FONT5x4 = {
     {'V', {0b1001, 0b1001, 0b1001, 0b0110, 0b0110}},
     {'W', {0b1001, 0b1001, 0b1011, 0b1101, 0b1001}},
     {'Y', {0b1001, 0b1001, 0b0110, 0b0100, 0b0100}},
+    {'X', {0b1001, 0b0110, 0b0100, 0b0110, 0b1001}},
+    {'Z', {0b1111, 0b0010, 0b0100, 0b1000, 0b1111}},
 };
 
 // Forward decl for slot icon rendering
@@ -604,24 +626,70 @@ void drawCrosshair(int winW, int winH)
 PauseMenuLayout computePauseLayout(int winW, int winH)
 {
     PauseMenuLayout l;
-    l.panelW = 360.0f;
-    l.panelH = 220.0f;
+    l.panelW = 520.0f;
+    l.panelH = 330.0f;
     l.panelX = (winW - l.panelW) * 0.5f;
     l.panelY = (winH - l.panelH) * 0.5f;
 
-    l.resumeW = l.panelW - 80.0f;
-    l.resumeH = 50.0f;
+    l.resumeW = l.panelW * 0.82f;
+    l.resumeH = 56.0f;
     l.resumeX = l.panelX + (l.panelW - l.resumeW) * 0.5f;
-    l.resumeY = l.panelY + 60.0f;
+    l.resumeY = l.panelY + 28.0f;
+
+    l.manageW = l.resumeW;
+    l.manageH = 56.0f;
+    l.manageX = l.resumeX;
+    l.manageY = l.resumeY + l.resumeH + 24.0f;
 
     l.quitW = l.resumeW;
-    l.quitH = 50.0f;
+    l.quitH = 56.0f;
     l.quitX = l.resumeX;
-    l.quitY = l.resumeY + 70.0f;
+    l.quitY = l.manageY + l.manageH + 24.0f;
     return l;
 }
 
-void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResume, bool hoverQuit)
+SaveMenuLayout computeSaveMenuLayout(int winW, int winH)
+{
+    SaveMenuLayout s;
+    s.panelW = 560.0f;
+    s.panelH = 400.0f;
+    s.panelX = (winW - s.panelW) * 0.5f;
+    s.panelY = (winH - s.panelH) * 0.5f;
+
+    s.listW = s.panelW * 0.86f;
+    s.listH = s.panelH * 0.52f;
+    s.listX = s.panelX + (s.panelW - s.listW) * 0.5f;
+    s.listY = s.panelY + 30.0f;
+
+    s.inputW = s.panelW * 0.86f;
+    s.inputH = 36.0f;
+    s.inputX = s.panelX + (s.panelW - s.inputW) * 0.5f;
+    s.inputY = s.listY + s.listH + 12.0f;
+
+    s.overwriteW = s.panelW * 0.26f;
+    s.overwriteH = 52.0f;
+    s.createW = s.overwriteW;
+    s.createH = s.overwriteH;
+    s.loadW = s.overwriteW;
+    s.loadH = s.overwriteH;
+    s.backW = s.overwriteW;
+    s.backH = s.overwriteH;
+
+    float total = s.createW + s.overwriteW + s.loadW + s.backW + 3 * 12.0f;
+    float start = s.panelX + (s.panelW - total) * 0.5f;
+    float buttonsY = s.inputY + s.inputH + 20.0f;
+    s.createX = start;
+    s.createY = buttonsY;
+    s.overwriteX = s.createX + s.createW + 12.0f;
+    s.overwriteY = buttonsY;
+    s.loadX = s.overwriteX + s.overwriteW + 12.0f;
+    s.loadY = buttonsY;
+    s.backX = s.loadX + s.loadW + 12.0f;
+    s.backY = buttonsY;
+    return s;
+}
+
+void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResume, bool hoverManage, bool hoverQuit)
 {
     drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.55f);
     drawQuad(l.panelX, l.panelY, l.panelW, l.panelH, 0.05f, 0.05f, 0.08f, 0.92f);
@@ -635,36 +703,99 @@ void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResum
     };
 
     drawButton(l.resumeX, l.resumeY, l.resumeW, l.resumeH, 0.16f, 0.55f, 0.25f, hoverResume);
+    drawButton(l.manageX, l.manageY, l.manageW, l.manageH, 0.2f, 0.4f, 0.8f, hoverManage);
     drawButton(l.quitX, l.quitY, l.quitW, l.quitH, 0.65f, 0.18f, 0.12f, hoverQuit);
 
-    // resume icon (triangle play)
-    glColor4f(1.0f, 1.0f, 1.0f, hoverResume ? 0.95f : 0.85f);
-    glBegin(GL_TRIANGLES);
-    float rx0 = l.resumeX + l.resumeW * 0.36f;
-    float ry0 = l.resumeY + l.resumeH * 0.22f;
-    float rx1 = l.resumeX + l.resumeW * 0.36f;
-    float ry1 = l.resumeY + l.resumeH * 0.78f;
-    float rx2 = l.resumeX + l.resumeW * 0.74f;
-    float ry2 = l.resumeY + l.resumeH * 0.5f;
-    glVertex2f(rx0, ry0);
-    glVertex2f(rx1, ry1);
-    glVertex2f(rx2, ry2);
-    glEnd();
+    auto centerTinyText = [](float x, float y, float w, float size, const std::string &txt, float r, float g, float b,
+                             float a)
+    {
+        float width = static_cast<float>(txt.size()) * (4.0f * size + size * 0.8f) - size * 0.8f;
+        float tx = x + (w - width) * 0.5f;
+        drawTextTiny(tx, y, size, txt, r, g, b, a);
+    };
 
-    // quit icon (X)
-    glLineWidth(4.0f);
-    glColor4f(1.0f, 1.0f, 1.0f, hoverQuit ? 0.95f : 0.85f);
-    float qx0 = l.quitX + l.quitW * 0.3f;
-    float qy0 = l.quitY + l.quitH * 0.3f;
-    float qx1 = l.quitX + l.quitW * 0.7f;
-    float qy1 = l.quitY + l.quitH * 0.7f;
-    glBegin(GL_LINES);
-    glVertex2f(qx0, qy0);
-    glVertex2f(qx1, qy1);
-    glVertex2f(qx0, qy1);
-    glVertex2f(qx1, qy0);
-    glEnd();
-    glLineWidth(1.0f);
+    float labelSize = 1.7f;
+    centerTinyText(l.resumeX, l.resumeY + l.resumeH * 0.33f, l.resumeW, labelSize, "RESUME", 1.0f, 1.0f, 1.0f,
+                   hoverResume ? 1.0f : 0.9f);
+    centerTinyText(l.manageX, l.manageY + l.manageH * 0.33f, l.manageW, labelSize, "SAVE / LOAD", 1.0f, 1.0f, 1.0f,
+                   hoverManage ? 1.0f : 0.9f);
+    centerTinyText(l.quitX, l.quitY + l.quitH * 0.33f, l.quitW, labelSize, "QUIT", 1.0f, 1.0f, 1.0f,
+                   hoverQuit ? 1.0f : 0.9f);
+}
+
+void drawSaveMenu(int winW, int winH, const SaveMenuLayout &s, int highlightedIndex, bool hoverCreate,
+                  bool hoverOverwrite, bool hoverLoad, bool hoverBack, const std::string &inputName)
+{
+    drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.55f);
+    drawQuad(s.panelX, s.panelY, s.panelW, s.panelH, 0.05f, 0.05f, 0.08f, 0.92f);
+    drawOutline(s.panelX, s.panelY, s.panelW, s.panelH, 1.0f, 1.0f, 1.0f, 0.08f, 3.0f);
+
+    drawQuad(s.listX, s.listY, s.listW, s.listH, 0.12f, 0.12f, 0.15f, 0.9f);
+    drawOutline(s.listX, s.listY, s.listW, s.listH, 1.0f, 1.0f, 1.0f, 0.15f, 2.0f);
+
+    float lineH = 20.0f;
+    float textSize = 1.4f;
+    for (int i = 0; i < static_cast<int>(gSaveList.size()); ++i)
+    {
+        float y = s.listY + 8.0f + i * lineH;
+        if (y + lineH > s.listY + s.listH - 8.0f)
+            break;
+        bool sel = (i == highlightedIndex);
+        if (sel)
+            drawQuad(s.listX + 4.0f, y - 2.0f, s.listW - 8.0f, lineH + 4.0f, 0.2f, 0.3f, 0.5f, 0.7f);
+        std::string name = stemFromPath(gSaveList[i]);
+        drawTextTiny(s.listX + 10.0f, y + 4.0f, textSize, name, 1.0f, 1.0f, 1.0f, 0.95f);
+    }
+
+    // input field
+    drawQuad(s.inputX, s.inputY, s.inputW, s.inputH, 0.12f, 0.12f, 0.15f, 0.9f);
+    float outlineA = gSaveInputFocus ? 0.55f : 0.2f;
+    drawOutline(s.inputX, s.inputY, s.inputW, s.inputH, 1.0f, 1.0f, 1.0f, outlineA, 2.0f);
+    std::string displayName = inputName.empty() ? "<nom>" : inputName;
+    float textSizeInput = 1.5f;
+    float textX = s.inputX + 10.0f;
+    float textY = s.inputY + 9.0f;
+    drawTextTiny(textX, textY, textSizeInput, displayName, 1.0f, 1.0f, 1.0f,
+                 inputName.empty() ? 0.6f : 0.95f);
+    if (gSaveInputFocus)
+    {
+        float charW = 4.0f * textSizeInput + textSizeInput * 0.8f;
+        float caretX = textX + static_cast<float>(inputName.size()) * charW;
+        float caretH = textSizeInput * 5.0f;
+        Uint32 t = SDL_GetTicks();
+        if ((t / 500) % 2 == 0)
+            drawQuad(caretX + 2.0f, textY, 2.0f, caretH, 1.0f, 1.0f, 1.0f, 0.9f);
+    }
+
+    auto drawButton = [](float x, float y, float w, float h, float r, float g, float b, bool hover)
+    {
+        float a = hover ? 0.95f : 0.8f;
+        drawQuad(x, y, w, h, r, g, b, a);
+        drawOutline(x, y, w, h, 0.0f, 0.0f, 0.0f, 0.45f, 3.0f);
+    };
+
+    drawButton(s.createX, s.createY, s.createW, s.createH, 0.2f, 0.5f, 0.8f, hoverCreate);
+    drawButton(s.overwriteX, s.overwriteY, s.overwriteW, s.overwriteH, 0.18f, 0.55f, 0.25f, hoverOverwrite);
+    drawButton(s.loadX, s.loadY, s.loadW, s.loadH, 0.45f, 0.18f, 0.75f, hoverLoad);
+    drawButton(s.backX, s.backY, s.backW, s.backH, 0.65f, 0.18f, 0.12f, hoverBack);
+
+    auto centerTinyText = [](float x, float y, float w, float size, const std::string &txt, float r, float g, float b,
+                             float a)
+    {
+        float width = static_cast<float>(txt.size()) * (4.0f * size + size * 0.8f) - size * 0.8f;
+        float tx = x + (w - width) * 0.5f;
+        drawTextTiny(tx, y, size, txt, r, g, b, a);
+    };
+
+    float labelSize = 1.6f;
+    centerTinyText(s.createX, s.createY + s.createH * 0.33f, s.createW, labelSize, "CREATE", 1.0f, 1.0f, 1.0f,
+                   hoverCreate ? 1.0f : 0.9f);
+    centerTinyText(s.overwriteX, s.overwriteY + s.overwriteH * 0.33f, s.overwriteW, labelSize, "OVERWRITE", 1.0f, 1.0f,
+                   1.0f, hoverOverwrite ? 1.0f : 0.9f);
+    centerTinyText(s.loadX, s.loadY + s.loadH * 0.33f, s.loadW, labelSize, "LOAD", 1.0f, 1.0f, 1.0f,
+                   hoverLoad ? 1.0f : 0.9f);
+    centerTinyText(s.backX, s.backY + s.backH * 0.33f, s.backW, labelSize, "RETURN", 1.0f, 1.0f, 1.0f,
+                   hoverBack ? 1.0f : 0.9f);
 }
 
 bool pointInRect(float mx, float my, float x, float y, float w, float h)
@@ -723,6 +854,199 @@ void drawTooltip(float mx, float my, int winW, int winH, const std::string &text
     drawQuad(tx, ty, width, height, 0.05f, 0.05f, 0.08f, 0.9f);
     drawOutline(tx, ty, width, height, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
     drawTextTiny(tx + padding, ty + padding, size, text, 1.0f, 0.95f, 0.85f, 1.0f);
+}
+
+// ---------- Save / Load ----------
+static const char *MAPS_DIR = "maps";
+
+struct SaveHeader
+{
+    char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
+    uint32_t version = 1;
+    uint32_t w = 0, h = 0, d = 0;
+    uint32_t seed = 0;
+};
+
+bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
+{
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+    std::ofstream out(path, std::ios::binary);
+    if (!out)
+        return false;
+    SaveHeader hdr;
+    hdr.w = static_cast<uint32_t>(world.getWidth());
+    hdr.h = static_cast<uint32_t>(world.getHeight());
+    hdr.d = static_cast<uint32_t>(world.getDepth());
+    hdr.seed = seed;
+    out.write(reinterpret_cast<const char *>(&hdr), sizeof(hdr));
+    int total = world.totalSize();
+    for (int i = 0; i < total; ++i)
+    {
+        int x = i % world.getWidth();
+        int y = (i / world.getWidth()) / world.getDepth();
+        int z = (i / world.getWidth()) % world.getDepth();
+        uint8_t b = static_cast<uint8_t>(world.get(x, y, z));
+        uint8_t p = world.getPower(x, y, z);
+        uint8_t btn = world.getButtonState(x, y, z);
+        out.write(reinterpret_cast<const char *>(&b), 1);
+        out.write(reinterpret_cast<const char *>(&p), 1);
+        out.write(reinterpret_cast<const char *>(&btn), 1);
+    }
+    return static_cast<bool>(out);
+}
+
+bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return false;
+    SaveHeader hdr{};
+    in.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));
+    if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
+        return false;
+    if (hdr.version != 1)
+        return false;
+    if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
+        hdr.d != static_cast<uint32_t>(world.getDepth()))
+        return false;
+
+    int total = world.totalSize();
+    for (int i = 0; i < total; ++i)
+    {
+        uint8_t b = 0, p = 0, btn = 0;
+        in.read(reinterpret_cast<char *>(&b), 1);
+        in.read(reinterpret_cast<char *>(&p), 1);
+        in.read(reinterpret_cast<char *>(&btn), 1);
+        if (!in)
+            return false;
+        int x = i % world.getWidth();
+        int y = (i / world.getWidth()) / world.getDepth();
+        int z = (i / world.getWidth()) % world.getDepth();
+        world.set(x, y, z, static_cast<BlockType>(b));
+        world.setPower(x, y, z, p);
+        world.setButtonState(x, y, z, btn);
+    }
+    seedOut = hdr.seed;
+    markAllChunksDirty();
+    return true;
+}
+
+std::string timestampSaveName()
+{
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tmStruct{};
+#ifdef _WIN32
+    localtime_s(&tmStruct, &t);
+#else
+    localtime_r(&t, &tmStruct);
+#endif
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "maps/%04d%02d%02d_%02d%02d%02d.bulldog", tmStruct.tm_year + 1900,
+                  tmStruct.tm_mon + 1, tmStruct.tm_mday, tmStruct.tm_hour, tmStruct.tm_min, tmStruct.tm_sec);
+    return std::string(buf);
+}
+
+std::string latestSaveInMaps()
+{
+    namespace fs = std::filesystem;
+    fs::path dir(MAPS_DIR);
+    if (!fs::exists(dir))
+        return {};
+    fs::file_time_type latestTime;
+    fs::path latestPath;
+    for (auto &p : fs::directory_iterator(dir))
+    {
+        if (!p.is_regular_file())
+            continue;
+        if (p.path().extension() != ".bulldog")
+            continue;
+        auto t = p.last_write_time();
+        if (latestPath.empty() || t > latestTime)
+        {
+            latestTime = t;
+            latestPath = p.path();
+        }
+    }
+    return latestPath.empty() ? std::string{} : latestPath.string();
+}
+
+std::vector<std::string> gSaveList;
+int gSaveIndex = -1;
+std::string gSaveNameInput;
+bool gSaveInputFocus = false;
+
+std::string stemFromPath(const std::string &path);
+
+void refreshSaveList()
+{
+    gSaveList.clear();
+    gSaveIndex = -1;
+    namespace fs = std::filesystem;
+    fs::path dir(MAPS_DIR);
+    if (!fs::exists(dir))
+        return;
+    std::vector<std::pair<fs::file_time_type, std::string>> entries;
+    for (auto &p : fs::directory_iterator(dir))
+    {
+        if (!p.is_regular_file())
+            continue;
+        if (p.path().extension() != ".bulldog")
+            continue;
+        entries.push_back({p.last_write_time(), p.path().string()});
+    }
+    std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+    for (auto &e : entries)
+        gSaveList.push_back(e.second);
+    if (!gSaveList.empty())
+        gSaveIndex = 0;
+}
+
+std::string stemFromPath(const std::string &path)
+{
+    namespace fs = std::filesystem;
+    fs::path p(path);
+    std::string stem = p.stem().string();
+    for (auto &c : stem)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return stem;
+}
+
+std::string normalizeSaveInput(const std::string &input)
+{
+    std::string out;
+    out.reserve(input.size());
+    for (char c : input)
+    {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')
+            out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    const size_t MAX_LEN = 32;
+    if (out.size() > MAX_LEN)
+        out.resize(MAX_LEN);
+    return out;
+}
+
+int findSaveIndexByStem(const std::string &stem)
+{
+    std::string target = normalizeSaveInput(stem);
+    for (int i = 0; i < static_cast<int>(gSaveList.size()); ++i)
+    {
+        if (normalizeSaveInput(stemFromPath(gSaveList[i])) == target)
+            return i;
+    }
+    return -1;
+}
+
+std::string buildSavePathFromInput(const std::string &input)
+{
+    std::string name = normalizeSaveInput(input);
+    if (name.empty())
+        return timestampSaveName();
+    const std::string ext = ".bulldog";
+    if (name.size() < ext.size() || name.substr(name.size() - ext.size()) != ext)
+        name += ext;
+    return std::string("maps/") + name;
 }
 
 void drawButtonStateLabels(const World &world, const Player &player, float radius)
@@ -1140,6 +1464,7 @@ int main()
     }
     bool inventoryOpen = false;
     bool pauseMenuOpen = false;
+    bool saveMenuOpen = false;
     int pendingSlot = -1;
     bool pendingIsHotbar = false;
     int mouseX = 0, mouseY = 0;
@@ -1202,14 +1527,20 @@ int main()
                     if (pauseMenuOpen)
                     {
                         pauseMenuOpen = false;
+                        saveMenuOpen = false;
+                        SDL_StopTextInput();
+                        gSaveInputFocus = false;
                         SDL_SetRelativeMouseMode(SDL_TRUE);
                         SDL_ShowCursor(SDL_FALSE);
                     }
                     else
                     {
                         pauseMenuOpen = true;
+                        saveMenuOpen = false;
+                        refreshSaveList();
                         inventoryOpen = false;
                         pendingSlot = -1;
+                        SDL_StopTextInput();
                         SDL_SetRelativeMouseMode(SDL_FALSE);
                         SDL_ShowCursor(SDL_TRUE);
                         smoothDX = smoothDY = 0.0f;
@@ -1238,6 +1569,16 @@ int main()
                     if (selected >= static_cast<int>(hotbarSlots.size()))
                         selected = static_cast<int>(hotbarSlots.size()) - 1;
                 }
+                else if (saveMenuOpen && e.key.keysym.sym == SDLK_BACKSPACE)
+                {
+                    if (!gSaveNameInput.empty())
+                        gSaveNameInput.pop_back();
+                }
+                else if (saveMenuOpen && e.key.keysym.sym == SDLK_TAB)
+                {
+                    std::string suggested = stemFromPath(timestampSaveName());
+                    gSaveNameInput = normalizeSaveInput(suggested);
+                }
                 else if ((e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
                 {
                     if (lastForwardTap >= 0.0f && (elapsedTime - lastForwardTap) <= SPRINT_DOUBLE_TAP)
@@ -1264,25 +1605,147 @@ int main()
                 winH = e.window.data2;
                 setup3D(winW, winH);
             }
+            else if (e.type == SDL_TEXTINPUT)
+            {
+                if (saveMenuOpen)
+                {
+                    const char *txt = e.text.text;
+                    for (int i = 0; txt[i] != '\0'; ++i)
+                    {
+                        char c = txt[i];
+                        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')
+                        {
+                            if (gSaveNameInput.size() < 32)
+                                gSaveNameInput.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+                        }
+                    }
+                }
+            }
             else if (e.type == SDL_MOUSEBUTTONDOWN)
             {
                 if (pauseMenuOpen)
                 {
-                    PauseMenuLayout l = computePauseLayout(winW, winH);
-                    bool hoverResume = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.resumeX,
-                                                   l.resumeY, l.resumeW, l.resumeH);
-                    bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY,
-                                                 l.quitW, l.quitH);
-                    if (hoverQuit)
+                    if (saveMenuOpen)
                     {
-                        running = false;
+                        SaveMenuLayout sm = computeSaveMenuLayout(winW, winH);
+                        bool hoverCreate =
+                            pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.createX, sm.createY,
+                                        sm.createW, sm.createH);
+                        bool hoverOverwrite =
+                            pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.overwriteX, sm.overwriteY,
+                                        sm.overwriteW, sm.overwriteH);
+                        bool hoverLoad = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.loadX,
+                                                     sm.loadY, sm.loadW, sm.loadH);
+                        bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.backX,
+                                                     sm.backY, sm.backW, sm.backH);
+
+                        if (pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.listX, sm.listY,
+                                        sm.listW, sm.listH))
+                        {
+                            float relY = static_cast<float>(mouseY) - sm.listY - 8.0f;
+                            int idx = static_cast<int>(relY / 20.0f);
+                            if (idx >= 0 && idx < static_cast<int>(gSaveList.size()))
+                                gSaveIndex = idx;
+                            gSaveInputFocus = false;
+                        }
+                        // focus input on click inside field
+                        if (pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.inputX, sm.inputY,
+                                        sm.inputW, sm.inputH))
+                        {
+                            SDL_StartTextInput();
+                            gSaveInputFocus = true;
+                        }
+                        else
+                        {
+                            gSaveInputFocus = false;
+                        }
+
+                        if (hoverCreate)
+                        {
+                            std::string path = buildSavePathFromInput(gSaveNameInput);
+                            bool ok = saveWorldToFile(world, path, seed);
+                            std::cout << (ok ? "Sauvegarde OK: " : "Sauvegarde KO: ") << path << "\n";
+                            if (ok)
+                            {
+                                refreshSaveList();
+                                int idx = findSaveIndexByStem(stemFromPath(path));
+                                if (idx >= 0)
+                                    gSaveIndex = idx;
+                                gSaveNameInput = normalizeSaveInput(stemFromPath(path));
+                                gSaveInputFocus = false;
+                            }
+                        }
+                        else if (hoverOverwrite)
+                        {
+                            std::string path;
+                            if (gSaveIndex >= 0 && gSaveIndex < static_cast<int>(gSaveList.size()))
+                                path = gSaveList[gSaveIndex];
+                            else
+                                path = timestampSaveName();
+                            bool ok = saveWorldToFile(world, path, seed);
+                            std::cout << (ok ? "Sauvegarde OK: " : "Sauvegarde KO: ") << path << "\n";
+                            if (ok)
+                            {
+                                refreshSaveList();
+                                if (!gSaveList.empty())
+                                    gSaveIndex = 0;
+                            }
+                        }
+                        else if (hoverLoad)
+                        {
+                            if (gSaveIndex >= 0 && gSaveIndex < static_cast<int>(gSaveList.size()))
+                            {
+                                std::string path = gSaveList[gSaveIndex];
+                                uint32_t newSeed = seed;
+                                bool ok = loadWorldFromFile(world, path, newSeed);
+                                if (ok)
+                                {
+                                    seed = newSeed;
+                                    player.x = WIDTH * 0.5f;
+                                    player.z = DEPTH * 0.5f;
+                                    player.y =
+                                        world.surfaceY(static_cast<int>(player.x), static_cast<int>(player.z)) + 0.2f;
+                                }
+                                std::cout << (ok ? "Chargement OK: " : "Chargement KO: ") << path << "\n";
+                            }
+                        }
+                        else if (hoverBack)
+                        {
+                            saveMenuOpen = false;
+                            SDL_StopTextInput();
+                        }
                     }
-                    else if (hoverResume)
+                    else
                     {
-                        pauseMenuOpen = false;
-                        SDL_SetRelativeMouseMode(SDL_TRUE);
-                        SDL_ShowCursor(SDL_FALSE);
-                        smoothDX = smoothDY = 0.0f;
+                        PauseMenuLayout l = computePauseLayout(winW, winH);
+                        bool hoverResume = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.resumeX,
+                                                       l.resumeY, l.resumeW, l.resumeH);
+                        bool hoverManage = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.manageX,
+                                                       l.manageY, l.manageW, l.manageH);
+                        bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX,
+                                                     l.quitY, l.quitW, l.quitH);
+                        if (hoverQuit)
+                        {
+                            running = false;
+                        }
+                        else if (hoverManage)
+                        {
+                            saveMenuOpen = true;
+                            SDL_StartTextInput();
+                            refreshSaveList();
+                            if (gSaveNameInput.empty())
+                                gSaveNameInput = normalizeSaveInput(stemFromPath(timestampSaveName()));
+                            gSaveInputFocus = true;
+                        }
+                        else if (hoverResume)
+                        {
+                            pauseMenuOpen = false;
+                            saveMenuOpen = false;
+                            SDL_StopTextInput();
+                            SDL_SetRelativeMouseMode(SDL_TRUE);
+                            SDL_ShowCursor(SDL_FALSE);
+                            smoothDX = smoothDY = 0.0f;
+                        }
                     }
                 }
                 else if (inventoryOpen)
@@ -1310,11 +1773,11 @@ int main()
                             }
                             pendingSlot = -1;
                         }
+                        }
                     }
-                }
-                else
-                {
-                    Vec3 fwd = forwardVec(player.yaw, player.pitch);
+                    else
+                    {
+                        Vec3 fwd = forwardVec(player.yaw, player.pitch);
                     float eyeY = player.y + EYE_HEIGHT;
                     HitInfo hit = raycast(world, player.x, eyeY, player.z, fwd.x, fwd.y, fwd.z, 8.0f);
                     if (hit.hit)
@@ -1529,12 +1992,31 @@ int main()
                                hoverLabel);
         if (pauseMenuOpen)
         {
-            PauseMenuLayout l = computePauseLayout(winW, winH);
-            bool hoverResume = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.resumeX, l.resumeY,
-                                           l.resumeW, l.resumeH);
-            bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY, l.quitW,
-                                         l.quitH);
-            drawPauseMenu(winW, winH, l, hoverResume, hoverQuit);
+            if (saveMenuOpen)
+            {
+                SaveMenuLayout sm = computeSaveMenuLayout(winW, winH);
+                bool hoverOverwrite = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.overwriteX,
+                                                  sm.overwriteY, sm.overwriteW, sm.overwriteH);
+                bool hoverLoad = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.loadX, sm.loadY,
+                                             sm.loadW, sm.loadH);
+                bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.backX, sm.backY,
+                                             sm.backW, sm.backH);
+                bool hoverCreate =
+                    pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.createX, sm.createY, sm.createW,
+                                sm.createH);
+                drawSaveMenu(winW, winH, sm, gSaveIndex, hoverCreate, hoverOverwrite, hoverLoad, hoverBack, gSaveNameInput);
+            }
+            else
+            {
+                PauseMenuLayout l = computePauseLayout(winW, winH);
+                bool hoverResume = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.resumeX, l.resumeY,
+                                               l.resumeW, l.resumeH);
+                bool hoverManage = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.manageX, l.manageY,
+                                               l.manageW, l.manageH);
+                bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY, l.quitW,
+                                             l.quitH);
+                drawPauseMenu(winW, winH, l, hoverResume, hoverManage, hoverQuit);
+            }
         }
         if (hoverLabel.valid)
             drawTooltip(hoverLabel.x, hoverLabel.y, winW, winH, hoverLabel.text);
