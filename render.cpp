@@ -618,6 +618,15 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                                 return true; // output side
                             return false;
                         }
+                        if (nb == BlockType::AndGate || nb == BlockType::OrGate)
+                        {
+                            // Inputs on left/right, output on +Z (wire sees gate at dz = -1)
+                            if (dx == 1 || dx == -1)
+                                return true;
+                            if (dz == -1)
+                                return true;
+                            return false;
+                        }
                         return nb == BlockType::Wire || nb == BlockType::Button || nb == BlockType::Led ||
                                nb == BlockType::AndGate || nb == BlockType::OrGate;
                     };

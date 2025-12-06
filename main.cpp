@@ -1445,11 +1445,9 @@ int main()
 
     int selected = 0;
     std::vector<ItemStack> hotbarSlots(HOTBAR.size());
-    for (size_t i = 0; i < HOTBAR.size(); ++i)
-    {
-        hotbarSlots[i].type = HOTBAR[i];
-        hotbarSlots[i].count = 64;
-    }
+    // start with empty hotbar
+    for (auto &s : hotbarSlots)
+        s = {};
     std::vector<ItemStack> inventorySlots(INV_COLS * INV_ROWS);
     {
         int idx = 0;
@@ -1556,12 +1554,27 @@ int main()
                 }
                 else if (e.key.keysym.sym == SDLK_r)
                 {
-                    world.generate(seed + 1);
-                    seed += 1337;
-                    player.x = WIDTH / 2.0f;
-                    player.z = DEPTH / 2.0f;
-                    player.y = world.surfaceY(static_cast<int>(player.x), static_cast<int>(player.z)) + 0.2f;
-                    markAllChunksDirty();
+                    float spawnX = WIDTH * 0.5f;
+                    float spawnZ = DEPTH * 0.5f;
+                    int sx = static_cast<int>(std::floor(spawnX));
+                    int sz = static_cast<int>(std::floor(spawnZ));
+                    int sy = world.surfaceY(sx, sz);
+                    if (sy < 0)
+                        sy = 0;
+                    // Find the first free spot above surface if blocked
+                    int checkY = sy + 1;
+                    auto blockedAt = [&](int y) {
+                        if (y < 0 || y + 1 >= world.getHeight())
+                            return true;
+                        return isSolid(world.get(sx, y, sz)) || isSolid(world.get(sx, y + 1, sz));
+                    };
+                    while (checkY < world.getHeight() - 2 && blockedAt(checkY))
+                        ++checkY;
+                    if (checkY >= world.getHeight() - 1)
+                        checkY = world.getHeight() - 2;
+                    player.x = spawnX;
+                    player.z = spawnZ;
+                    player.y = static_cast<float>(checkY) + 0.2f;
                 }
                 else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_6)
                 {
