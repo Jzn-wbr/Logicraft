@@ -29,7 +29,7 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
 
 const std::vector<BlockType> HOTBAR = {BlockType::Dirt,   BlockType::Grass, BlockType::Wood,
                                        BlockType::Stone,  BlockType::Glass, BlockType::NotGate,
-                                       BlockType::Sign};
+                                       BlockType::Sign,   BlockType::Wire};
 const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt,     BlockType::Grass, BlockType::Wood,
                                                   BlockType::Stone,    BlockType::Glass, BlockType::AndGate,
                                                   BlockType::OrGate,   BlockType::NotGate, BlockType::Led,

@@ -1881,7 +1881,7 @@ int main()
                     player.z = spawnZ;
                     player.y = static_cast<float>(checkY) + 0.2f;
                 }
-                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_6 && !gSignEditOpen)
+                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_8 && !gSignEditOpen)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
                     if (selected >= static_cast<int>(hotbarSlots.size()))
@@ -1945,6 +1945,25 @@ int main()
                     // Filtre de la souris pour lisser les mouvements et limiter les saccades
                     smoothDX = smoothDX * 0.6f + static_cast<float>(e.motion.xrel) * 0.4f;
                     smoothDY = smoothDY * 0.6f + static_cast<float>(e.motion.yrel) * 0.4f;
+                }
+            }
+            else if (e.type == SDL_MOUSEWHEEL)
+            {
+                if (!inventoryOpen && !pauseMenuOpen)
+                {
+                    if (e.wheel.y > 0)
+                    {
+                        // scroll up: previous slot (wrap)
+                        if (selected <= 0)
+                            selected = static_cast<int>(hotbarSlots.size()) - 1;
+                        else
+                            --selected;
+                    }
+                    else if (e.wheel.y < 0)
+                    {
+                        // scroll down: next slot (wrap)
+                        selected = (selected + 1) % static_cast<int>(hotbarSlots.size());
+                    }
                 }
             }
             else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
