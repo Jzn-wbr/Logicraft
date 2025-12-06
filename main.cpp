@@ -34,6 +34,17 @@ Vec3 cross(const Vec3 &a, const Vec3 &b)
     return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 
+Vec3 forwardVec(float yaw, float pitch);
+
+void interactWithTargetBlock(const World &world, const Player &player, float eyeHeight)
+{
+    Vec3 fwd = forwardVec(player.yaw, player.pitch);
+    float eyeY = player.y + eyeHeight;
+    HitInfo hit = raycast(world, player.x, eyeY, player.z, fwd.x, fwd.y, fwd.z, 8.0f);
+    if (!hit.hit)
+        return;
+}
+
 Vec3 normalizeVec(const Vec3 &v)
 {
     float len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -549,9 +560,12 @@ const std::map<char, std::array<uint8_t, 5>> FONT5x4 = {
     {'E', {0b1111, 0b1000, 0b1110, 0b1000, 0b1111}},
     {'F', {0b1111, 0b1000, 0b1110, 0b1000, 0b1000}},
     {'G', {0b0111, 0b1000, 0b1011, 0b1001, 0b0111}},
+    {'H', {0b1001, 0b1001, 0b1111, 0b1001, 0b1001}},
     {'I', {0b1110, 0b0100, 0b0100, 0b0100, 0b1110}},
+    {'J', {0b0011, 0b0001, 0b0001, 0b1001, 0b0110}},
     {'L', {0b1000, 0b1000, 0b1000, 0b1000, 0b1111}},
-    {'M', {0b1001, 0b1101, 0b1011, 0b1001, 0b1001}},
+    {'M', {0b1111, 0b1001, 0b1001, 0b1001, 0b1001}},
+    {'K', {0b1001, 0b1010, 0b1100, 0b1010, 0b1001}},
     {'N', {0b1001, 0b1101, 0b1011, 0b1001, 0b1001}},
     {'O', {0b0110, 0b1001, 0b1001, 0b1001, 0b0110}},
     {'P', {0b1110, 0b1001, 0b1110, 0b1000, 0b1000}},
@@ -565,6 +579,38 @@ const std::map<char, std::array<uint8_t, 5>> FONT5x4 = {
     {'Y', {0b1001, 0b1001, 0b0110, 0b0100, 0b0100}},
     {'X', {0b1001, 0b0110, 0b0100, 0b0110, 0b1001}},
     {'Z', {0b1111, 0b0010, 0b0100, 0b1000, 0b1111}},
+    // === PONCTUATION ===
+    {'.', {0b0000, 0b0000, 0b0000, 0b0000, 0b0100}},
+    {',', {0b0000, 0b0000, 0b0000, 0b0100, 0b1000}},
+    {':', {0b0000, 0b0100, 0b0000, 0b0100, 0b0000}},
+    {';', {0b0000, 0b0100, 0b0000, 0b0100, 0b1000}},
+    {'!', {0b0100, 0b0100, 0b0100, 0b0000, 0b0100}},
+    {'?', {0b0110, 0b0001, 0b0010, 0b0000, 0b0010}},
+    {'-', {0b0000, 0b0000, 0b0110, 0b0000, 0b0000}},
+    {'_', {0b0000, 0b0000, 0b0000, 0b0000, 0b1111}},
+    {'(', {0b0010, 0b0100, 0b0100, 0b0100, 0b0010}},
+    {')', {0b0100, 0b0010, 0b0010, 0b0010, 0b0100}},
+    {'+', {0b0000, 0b0100, 0b1110, 0b0100, 0b0000}},
+    {'=', {0b0000, 0b1110, 0b0000, 0b1110, 0b0000}},
+    {'/', {0b0001, 0b0010, 0b0100, 0b1000, 0b0000}},
+    {'*', {0b0100, 0b1110, 0b0100, 0b1110, 0b0100}},
+    {'%', {0b1001, 0b0010, 0b0100, 0b1000, 0b0110}},
+    {'\'', {0b0100, 0b0100, 0b0000, 0b0000, 0b0000}},
+    {'"', {0b1010, 0b1010, 0b0000, 0b0000, 0b0000}},
+
+    // === SYMBOLS ASCII ===
+    {'#', {0b0101, 0b1111, 0b0101, 0b1111, 0b0101}},
+    {'$', {0b0110, 0b1010, 0b0110, 0b0101, 0b0110}},
+    {'&', {0b0100, 0b1010, 0b0100, 0b1010, 0b0111}},
+    {'@', {0b0110, 0b1001, 0b1011, 0b1000, 0b0110}},
+    {'<', {0b0010, 0b0100, 0b1000, 0b0100, 0b0010}},
+    {'>', {0b1000, 0b0100, 0b0010, 0b0100, 0b1000}},
+    {'[', {0b0110, 0b0100, 0b0100, 0b0100, 0b0110}},
+    {']', {0b0110, 0b0010, 0b0010, 0b0010, 0b0110}},
+    {'{', {0b0010, 0b0100, 0b1000, 0b0100, 0b0010}}, // same shape than '(' but centered
+    {'}', {0b0100, 0b0010, 0b0001, 0b0010, 0b0100}},
+    {'|', {0b0100, 0b0100, 0b0100, 0b0100, 0b0100}},
+    {'\\', {0b1000, 0b0100, 0b0010, 0b0001, 0b0000}},
 };
 
 // Forward decl for slot icon rendering
@@ -861,13 +907,28 @@ void drawTooltip(float mx, float my, int winW, int winH, const std::string &text
     drawTextTiny(tx + padding, ty + padding, size, text, 1.0f, 0.95f, 0.85f, 1.0f);
 }
 
+void drawSignEditBox(int winW, int winH, const std::string &text)
+{
+    float size = 5.0f;
+    float padding = 3.0f;
+    const std::string placeholder = "<Tapez le texte du panneau>";
+    const std::string &display = text.empty() ? placeholder : text;
+    float width = static_cast<float>(std::max<size_t>(1, display.size())) * (4 * size + size * 0.8f) - size * 0.8f + padding * 2;
+    float height = 5 * size + padding * 2;
+    float tx = (winW - width) * 0.5f;
+    float ty = winH * 0.5f - height * 0.5f;
+    drawQuad(tx, ty, width, height, 0.02f, 0.02f, 0.04f, 0.9f);
+    drawOutline(tx, ty, width, height, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+    drawTextTiny(tx + padding, ty + padding, size, display, 1.0f, 0.95f, 0.85f, 1.0f);
+}
+
 // ---------- Save / Load ----------
 static const char *MAPS_DIR = "maps";
 
 struct SaveHeader
 {
     char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
-    uint32_t version = 1;
+    uint32_t version = 2;
     uint32_t w = 0, h = 0, d = 0;
     uint32_t seed = 0;
 };
@@ -897,6 +958,34 @@ bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
         out.write(reinterpret_cast<const char *>(&p), 1);
         out.write(reinterpret_cast<const char *>(&btn), 1);
     }
+
+    // Save sign texts (only for version >= 2)
+    std::vector<std::pair<uint32_t, std::string>> signs;
+    signs.reserve(128);
+    for (int i = 0; i < total; ++i)
+    {
+        int x = i % world.getWidth();
+        int y = (i / world.getWidth()) / world.getDepth();
+        int z = (i / world.getWidth()) % world.getDepth();
+        if (world.get(x, y, z) != BlockType::Sign)
+            continue;
+        const std::string &txt = world.getSignText(x, y, z);
+        if (txt.empty())
+            continue;
+        signs.emplace_back(static_cast<uint32_t>(i), txt);
+    }
+    uint32_t signCount = static_cast<uint32_t>(signs.size());
+    out.write(reinterpret_cast<const char *>(&signCount), sizeof(signCount));
+    for (const auto &s : signs)
+    {
+        uint32_t idx = s.first;
+        const std::string &txt = s.second;
+        uint16_t len = static_cast<uint16_t>(std::min<size_t>(txt.size(), 65535));
+        out.write(reinterpret_cast<const char *>(&idx), sizeof(idx));
+        out.write(reinterpret_cast<const char *>(&len), sizeof(len));
+        if (len > 0)
+            out.write(txt.data(), len);
+    }
     return static_cast<bool>(out);
 }
 
@@ -909,7 +998,7 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     in.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));
     if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
         return false;
-    if (hdr.version != 1)
+    if (hdr.version != 1 && hdr.version != 2)
         return false;
     if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
         hdr.d != static_cast<uint32_t>(world.getDepth()))
@@ -930,6 +1019,41 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
         world.set(x, y, z, static_cast<BlockType>(b));
         world.setPower(x, y, z, p);
         world.setButtonState(x, y, z, btn);
+    }
+
+    // Load sign texts for version >= 2
+    if (hdr.version >= 2)
+    {
+        uint32_t signCount = 0;
+        in.read(reinterpret_cast<char *>(&signCount), sizeof(signCount));
+        if (!in)
+            return false;
+        for (uint32_t i = 0; i < signCount; ++i)
+        {
+            uint32_t idx = 0;
+            uint16_t len = 0;
+            in.read(reinterpret_cast<char *>(&idx), sizeof(idx));
+            in.read(reinterpret_cast<char *>(&len), sizeof(len));
+            if (!in)
+                return false;
+            std::string txt;
+            txt.resize(len);
+            if (len > 0)
+            {
+                in.read(&txt[0], len);
+                if (!in)
+                    return false;
+            }
+            int x = static_cast<int>(idx % static_cast<uint32_t>(world.getWidth()));
+            int y = static_cast<int>((idx / static_cast<uint32_t>(world.getWidth())) /
+                                     static_cast<uint32_t>(world.getDepth()));
+            int z = static_cast<int>((idx / static_cast<uint32_t>(world.getWidth())) %
+                                     static_cast<uint32_t>(world.getDepth()));
+            if (world.inside(x, y, z) && world.get(x, y, z) == BlockType::Sign)
+            {
+                world.setSignText(x, y, z, txt);
+            }
+        }
     }
     seedOut = hdr.seed;
     markAllChunksDirty();
@@ -980,6 +1104,9 @@ std::vector<std::string> gSaveList;
 int gSaveIndex = -1;
 std::string gSaveNameInput;
 bool gSaveInputFocus = false;
+bool gSignEditOpen = false;
+int gSignEditX = 0, gSignEditY = 0, gSignEditZ = 0;
+std::string gSignEditBuffer;
 
 std::string stemFromPath(const std::string &path);
 
@@ -1171,6 +1298,24 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         float textY = y + slotSize * 0.4f;
         drawTextTiny(textX, textY, txtSize, "NOT", 1.0f, 1.0f, 1.0f, 1.0f);
         glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::Sign:
+    {
+        // simple board + post icon
+        float boardW = slotSize * 0.7f;
+        float boardH = slotSize * 0.35f;
+        float poleW = slotSize * 0.12f;
+        float poleH = slotSize * 0.3f;
+
+        float boardX = cx - boardW * 0.5f;
+        float boardY = y + slotSize * 0.2f;
+        float poleX = cx - poleW * 0.5f;
+        float poleY = boardY + boardH;
+
+        drawQuad(boardX, boardY, boardW, boardH, 0.85f, 0.7f, 0.45f, 0.9f);
+        drawOutline(boardX, boardY, boardW, boardH, 0.1f, 0.07f, 0.03f, 0.9f, 2.0f);
+        drawQuad(poleX, poleY, poleW, poleH, 0.6f, 0.45f, 0.25f, 0.9f);
         break;
     }
     case BlockType::Air:
@@ -1650,8 +1795,8 @@ int main()
             fps = fps * 0.9f + (1.0f / dt) * 0.1f; // lissage simple
         }
 
-        // Applique la souris liss??e ici pour stabiliser la camera
-        if (!inventoryOpen && !pauseMenuOpen)
+        // Applique la souris lissée ici pour stabiliser la camera
+        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen)
         {
             const float sensitivity = 0.011f;
             player.yaw += smoothDX * sensitivity;
@@ -1699,7 +1844,7 @@ int main()
                         smoothDX = smoothDY = 0.0f;
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen)
+                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen)
                 {
                     inventoryOpen = !inventoryOpen;
                     pendingSlot = -1;
@@ -1707,7 +1852,7 @@ int main()
                     SDL_ShowCursor(inventoryOpen ? SDL_TRUE : SDL_FALSE);
                     smoothDX = smoothDY = 0.0f;
                 }
-                else if (e.key.keysym.sym == SDLK_r)
+                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen)
                 {
                     float spawnX = WIDTH * 0.5f;
                     float spawnZ = DEPTH * 0.5f;
@@ -1732,7 +1877,7 @@ int main()
                     player.z = spawnZ;
                     player.y = static_cast<float>(checkY) + 0.2f;
                 }
-                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_6)
+                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_6 && !gSignEditOpen)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
                     if (selected >= static_cast<int>(hotbarSlots.size()))
@@ -1743,18 +1888,38 @@ int main()
                     if (!gSaveNameInput.empty())
                         gSaveNameInput.pop_back();
                 }
+                else if (gSignEditOpen && e.key.keysym.sym == SDLK_BACKSPACE)
+                {
+                    if (!gSignEditBuffer.empty())
+                        gSignEditBuffer.pop_back();
+                }
                 else if (saveMenuOpen && e.key.keysym.sym == SDLK_TAB)
                 {
                     std::string suggested = stemFromPath(timestampSaveName());
                     gSaveNameInput = normalizeSaveInput(suggested);
                 }
-                else if ((e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
+                else if (gSignEditOpen && (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
+                {
+                    world.setSignText(gSignEditX, gSignEditY, gSignEditZ, gSignEditBuffer);
+                    gSignEditOpen = false;
+                    SDL_StopTextInput();
+                }
+                else if (gSignEditOpen && e.key.keysym.sym == SDLK_ESCAPE)
+                {
+                    gSignEditOpen = false;
+                    SDL_StopTextInput();
+                }
+                else if (!gSignEditOpen && (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
                 {
                     if (lastForwardTap >= 0.0f && (elapsedTime - lastForwardTap) <= SPRINT_DOUBLE_TAP)
                     {
                         sprinting = true;
                     }
                     lastForwardTap = elapsedTime;
+                }
+                else if (e.key.keysym.sym == SDLK_q && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen)
+                {
+                    interactWithTargetBlock(world, player, EYE_HEIGHT);
                 }
             }
             else if (e.type == SDL_MOUSEMOTION)
@@ -1787,6 +1952,16 @@ int main()
                             if (gSaveNameInput.size() < 32)
                                 gSaveNameInput.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
                         }
+                    }
+                }
+                else if (gSignEditOpen)
+                {
+                    const char *txt = e.text.text;
+                    for (int i = 0; txt[i] != '\0'; ++i)
+                    {
+                        char c = txt[i];
+                        if (c >= 32 && c <= 126 && gSignEditBuffer.size() < 48)
+                            gSignEditBuffer.push_back(c);
                     }
                 }
             }
@@ -1963,7 +2138,16 @@ int main()
                         else if (e.button.button == SDL_BUTTON_RIGHT)
                         {
                             BlockType target = world.get(hit.x, hit.y, hit.z);
-                            if (target == BlockType::Button)
+                            if (target == BlockType::Sign)
+                            {
+                                gSignEditOpen = true;
+                                gSignEditX = hit.x;
+                                gSignEditY = hit.y;
+                                gSignEditZ = hit.z;
+                                gSignEditBuffer = world.getSignText(hit.x, hit.y, hit.z);
+                                SDL_StartTextInput();
+                            }
+                            else if (target == BlockType::Button)
                             {
                                 world.toggleButton(hit.x, hit.y, hit.z);
                             }
@@ -1990,7 +2174,7 @@ int main()
             }
         }
 
-        float simDt = pauseMenuOpen ? 0.0f : dt;
+        float simDt = (pauseMenuOpen || gSignEditOpen) ? 0.0f : dt;
 
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         Vec3 fwd = forwardVec(player.yaw, player.pitch);
@@ -1998,7 +2182,7 @@ int main()
         float moveSpeed = SPEED * (sprinting ? SPRINT_MULT : 1.0f);
         bool forwardHeld = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_Z];
 
-        if (!inventoryOpen && !pauseMenuOpen)
+        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen)
         {
             if (forwardHeld)
             {
@@ -2010,7 +2194,7 @@ int main()
                 player.vx -= fwd.x * moveSpeed * simDt;
                 player.vz -= fwd.z * moveSpeed * simDt;
             }
-            if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_Q])
+            if (keys[SDL_SCANCODE_A])
             {
                 player.vx -= right.x * moveSpeed * simDt;
                 player.vz -= right.z * moveSpeed * simDt;
@@ -2029,7 +2213,7 @@ int main()
                 player.vy = -JUMP;
             }
         }
-        if (!forwardHeld || inventoryOpen || pauseMenuOpen)
+        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen)
         {
             sprinting = false;
         }
@@ -2172,12 +2356,12 @@ int main()
         Vec3 fwdCast = forwardVec(player.yaw, player.pitch);
         float eyeY = player.y + EYE_HEIGHT;
         HitInfo hit = raycast(world, player.x, eyeY, player.z, fwdCast.x, fwdCast.y, fwdCast.z, 8.0f);
+        HoverLabel hoverLabel;
         if (hit.hit)
         {
             drawFaceHighlight(hit);
         }
 
-        HoverLabel hoverLabel;
         beginHud(winW, winH);
         if (!inventoryOpen && !pauseMenuOpen)
             drawCrosshair(winW, winH);
@@ -2215,6 +2399,8 @@ int main()
         }
         if (hoverLabel.valid)
             drawTooltip(hoverLabel.x, hoverLabel.y, winW, winH, hoverLabel.text);
+        if (gSignEditOpen)
+            drawSignEditBox(winW, winH, gSignEditBuffer);
         endHud();
 
         SDL_GL_SwapWindow(window);

@@ -24,7 +24,8 @@ enum class BlockType
     NotGate,
     Led,
     Button,
-    Wire
+    Wire,
+    Sign
 };
 
 struct BlockInfo

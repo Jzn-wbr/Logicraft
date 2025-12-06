@@ -35,6 +35,9 @@ public:
     bool inside(int x, int y, int z) const;
     int surfaceY(int x, int z) const;
 
+    const std::string &getSignText(int x, int y, int z) const;
+    void setSignText(int x, int y, int z, const std::string &text);
+
 private:
     int width;
     int height;
@@ -42,6 +45,7 @@ private:
     std::vector<BlockType> tiles;
     std::vector<uint8_t> power;
     std::vector<uint8_t> buttonState;
+    std::vector<std::string> signText;
 };
 
 HitInfo raycast(const World &world, float ox, float oy, float oz, float dx, float dy, float dz, float maxDist);

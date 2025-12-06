@@ -370,10 +370,7 @@ GLuint loadTextureFromBMP(const std::string &path)
 
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0},    {BlockType::Dirt, 1},   {BlockType::Stone, 2},   {BlockType::Wood, 3},
-                  {BlockType::Leaves, 4},   {BlockType::Water, 5},  {BlockType::Plank, 6},   {BlockType::Sand, 7},
-                  {BlockType::Air, 8},      {BlockType::Glass, 9},  {BlockType::AndGate, 10}, {BlockType::OrGate, 11},
-                  {BlockType::NotGate, 12}, {BlockType::Led, 13},   {BlockType::Button, 14},  {BlockType::Wire, 15}};
+    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::Led, 13}, {BlockType::Button, 14}, {BlockType::Wire, 15}, {BlockType::Sign, 16}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
     gAndTopTile = nextTile++;
@@ -413,6 +410,7 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Button], base(BlockType::Button), 18);
     fillTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire), 19);
     fillTile(pixels, texW, gBlockTile[BlockType::NotGate], base(BlockType::NotGate), 20);
+    fillTile(pixels, texW, gBlockTile[BlockType::Sign], base(BlockType::Sign), 1);
     fillGateTileWithLabels(pixels, texW, gAndTopTile, base(BlockType::AndGate), 15, "AND");
     fillGateTileWithLabels(pixels, texW, gOrTopTile, base(BlockType::OrGate), 16, "OR");
     fillNotGateTile(pixels, texW, gNotTopTile, base(BlockType::NotGate), 15);
@@ -668,8 +666,178 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     continue;
                 }
 
+                if (b == BlockType::Sign)
+                {
+                    float cx = static_cast<float>(x) + 0.5f;
+                    float cz = static_cast<float>(z) + 0.5f;
+                    float baseY = static_cast<float>(y);
+                    float boardW = 0.9f;
+                    float boardH = 0.6f;
+                    float boardT = 0.08f;
+                    float poleW = 0.12f;
+                    float poleH = 0.6f;
+                    float halfBoardW = boardW * 0.5f;
+                    float halfBoardH = boardH * 0.5f;
+                    float halfBoardT = boardT * 0.5f;
+                    float halfPoleW = poleW * 0.5f;
+
+                    float boardMinX = cx - halfBoardW;
+                    float boardMaxX = cx + halfBoardW;
+                    float boardMinY = baseY + 0.8f - halfBoardH;
+                    float boardMaxY = baseY + 0.8f + halfBoardH;
+                    float boardMinZ = cz - halfBoardT;
+                    float boardMaxZ = cz + halfBoardT;
+
+                    float poleMinX = cx - halfPoleW;
+                    float poleMaxX = cx + halfPoleW;
+                    float poleMinY = baseY + 0.1f;
+                    float poleMaxY = baseY + 0.1f + poleH;
+                    float poleMinZ = cz - halfPoleW;
+                    float poleMaxZ = cz + halfPoleW;
+
+                    int tile = tileIndexFor(b);
+                    auto addBoxWithTile = [&](float minX, float minY, float minZ, float maxX, float maxY, float maxZ)
+                    {
+                        addBox(minX, minY, minZ, maxX, maxY, maxZ, color, tile);
+                    };
+
+                    // Board + pole
+                    addBoxWithTile(boardMinX, boardMinY, boardMinZ, boardMaxX, boardMaxY, boardMaxZ);
+                    addBoxWithTile(poleMinX, poleMinY, poleMinZ, poleMaxX, poleMaxY, poleMaxZ);
+
+                    // Text drawn slightly in front of the board (both faces), up to 4 lines of 16 chars
+                    const std::string &txt = world.getSignText(x, y, z);
+                    if (!txt.empty())
+                    {
+                        std::string text = txt;
+                        const int glyphCols = 4;
+                        const int glyphRows = 5;
+                        const float spacingCols = 1.0f; // one empty column between chars
+                        const int maxCharsPerLine = 16;
+                        const int maxLines = 4;
+                        const int maxTotalChars = maxCharsPerLine * maxLines;
+
+                        if (static_cast<int>(text.size()) > maxTotalChars)
+                            text.resize(maxTotalChars);
+                        if (text.empty())
+                            goto after_sign_text;
+
+                        float marginX = boardW * 0.08f;
+                        float marginY = boardH * 0.15f;
+                        float usableW = boardW - marginX * 2.0f;
+                        float usableH = boardH - marginY * 2.0f;
+                        if (usableW <= 0.0f || usableH <= 0.0f)
+                            goto after_sign_text;
+
+                        // Split text into multiple lines (up to 4x16)
+                        std::vector<std::string> lines;
+                        for (size_t i = 0; i < text.size(); i += maxCharsPerLine)
+                        {
+                            if (static_cast<int>(lines.size()) >= maxLines)
+                                break;
+                            size_t len = std::min<size_t>(maxCharsPerLine, text.size() - i);
+                            lines.emplace_back(text.substr(i, len));
+                        }
+                        if (lines.empty())
+                            goto after_sign_text;
+
+                        auto lineUnitsX = [&](int chars)
+                        {
+                            if (chars <= 0)
+                                return 0.0f;
+                            return static_cast<float>(chars * glyphCols) +
+                                   static_cast<float>(std::max(0, chars - 1)) * spacingCols;
+                        };
+
+                        float longestUnitsX = 0.0f;
+                        for (const auto &ln : lines)
+                            longestUnitsX = std::max(longestUnitsX, lineUnitsX(static_cast<int>(ln.size())));
+                        if (longestUnitsX <= 0.0f)
+                            goto after_sign_text;
+
+                        const int lineGapRows = 2;
+                        int lineCount = static_cast<int>(lines.size());
+                        float totalUnitsY = static_cast<float>(lineCount * glyphRows +
+                                                               std::max(0, lineCount - 1) * lineGapRows);
+
+                        float cellFromW = usableW / longestUnitsX;
+                        float cellFromH = usableH / totalUnitsY;
+                        float cell = std::min(cellFromW, cellFromH);
+                        if (cell <= 0.0f)
+                            goto after_sign_text;
+
+                        float boardCenterY = 0.5f * (boardMinY + boardMaxY);
+                        float totalTextHeight = totalUnitsY * cell;
+                        // Y+ is up, so the top of the text block is at center + half height
+                        float textMaxYAll = boardCenterY + totalTextHeight * 0.5f;
+
+                        std::array<float, 3> textColor = {0.15f, 0.07f, 0.02f};
+
+                        auto drawTextSide = [&](float zFront, float zBack, bool mirrorX)
+                        {
+                            for (int li = 0; li < static_cast<int>(lines.size()); ++li)
+                            {
+                                const std::string &line = lines[li];
+                                if (line.empty())
+                                    continue;
+
+                                float lineUnitsYBefore = static_cast<float>(li * (glyphRows + lineGapRows));
+                                float lineMaxY = textMaxYAll - lineUnitsYBefore * cell;
+                                float lineMinY = lineMaxY - static_cast<float>(glyphRows) * cell;
+
+                                float unitsX = lineUnitsX(static_cast<int>(line.size()));
+                                float lineWidth = unitsX * cell;
+                                float lineMinX = cx - lineWidth * 0.5f;
+
+                                for (size_t i = 0; i < line.size(); ++i)
+                                {
+                                    char c = static_cast<char>(std::toupper(static_cast<unsigned char>(line[i])));
+                                    auto it = FONT5x4.find(c);
+                                    if (it == FONT5x4.end())
+                                        continue;
+
+                                    float charOffsetUnits =
+                                        static_cast<float>(i) * (static_cast<float>(glyphCols) + spacingCols);
+                                    float charMinX = lineMinX + charOffsetUnits * cell;
+
+                                    const auto &rows = it->second;
+                                    for (int row = 0; row < glyphRows; ++row)
+                                    {
+                                        uint8_t mask = rows[row];
+                                        for (int col = 0; col < glyphCols; ++col)
+                                        {
+                                            if (!(mask & (1u << (glyphCols - 1 - col))))
+                                                continue;
+                                            float px0 = charMinX + static_cast<float>(col) * cell;
+                                            float px1 = px0 + cell;
+                                            if (mirrorX)
+                                            {
+                                                float d0 = px0 - cx;
+                                                float d1 = px1 - cx;
+                                                px0 = cx - d1;
+                                                px1 = cx - d0;
+                                            }
+                                            float py1 = lineMaxY - static_cast<float>(row) * cell;
+                                            float py0 = py1 - cell;
+                                            addBox(px0, py0, zFront, px1, py1, zBack, textColor, tile);
+                                        }
+                                    }
+                                }
+                            }
+                        };
+
+                        // Front (+Z) and back (-Z, mirrored)
+                        drawTextSide(boardMaxZ + 0.002f, boardMaxZ + 0.004f, false);
+                        drawTextSide(boardMinZ - 0.004f, boardMinZ - 0.002f, true);
+                    }
+
+                after_sign_text:
+                    continue;
+                }
+
                 bool isGlass = (b == BlockType::Glass);
-                auto neighborIsGlass = [&](int nx, int ny, int nz) {
+                auto neighborIsGlass = [&](int nx, int ny, int nz)
+                {
                     if (!world.inside(nx, ny, nz))
                         return false;
                     return world.get(nx, ny, nz) == BlockType::Glass;

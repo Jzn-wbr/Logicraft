@@ -24,14 +24,16 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Led, {"LED", true, {0.95f, 0.9f, 0.2f}}},
     {BlockType::Button, {"Button", true, {0.6f, 0.2f, 0.2f}}},
     {BlockType::Wire, {"Wire", true, {0.55f, 0.55f, 0.58f}}},
+    {BlockType::Sign, {"Sign", false, {0.85f, 0.7f, 0.45f}}},
 };
 
-const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
-                                       BlockType::Stone, BlockType::Glass, BlockType::NotGate};
+const std::vector<BlockType> HOTBAR = {BlockType::Dirt,   BlockType::Grass, BlockType::Wood,
+                                       BlockType::Stone,  BlockType::Glass, BlockType::NotGate,
+                                       BlockType::Sign};
 const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt,     BlockType::Grass, BlockType::Wood,
                                                   BlockType::Stone,    BlockType::Glass, BlockType::AndGate,
                                                   BlockType::OrGate,   BlockType::NotGate, BlockType::Led,
-                                                  BlockType::Button,   BlockType::Wire};
+                                                  BlockType::Button,   BlockType::Wire,    BlockType::Sign};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -55,7 +57,7 @@ bool isTransparent(BlockType b)
 
 World::World(int w, int h, int d)
     : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), power(w * h * d, 0),
-      buttonState(w * h * d, 0)
+      buttonState(w * h * d, 0), signText(w * h * d)
 {
 }
 
@@ -68,6 +70,8 @@ void World::set(int x, int y, int z, BlockType b)
     power[idx] = 0;
     if (b != BlockType::Button)
         buttonState[idx] = 0;
+    if (b != BlockType::Sign)
+        signText[idx].clear();
 }
 
 uint8_t World::getPower(int x, int y, int z) const { return power[index(x, y, z)]; }
@@ -146,6 +150,24 @@ int World::surfaceY(int x, int z) const
         }
     }
     return height / 2;
+}
+
+const std::string &World::getSignText(int x, int y, int z) const
+{
+    static const std::string empty;
+    int idx = index(x, y, z);
+    if (idx < 0 || idx >= static_cast<int>(signText.size()))
+        return empty;
+    return signText[idx];
+}
+
+void World::setSignText(int x, int y, int z, const std::string &text)
+{
+    int idx = index(x, y, z);
+    if (idx < 0 || idx >= static_cast<int>(signText.size()))
+        return;
+    signText[idx] = text;
+    markChunkFromBlock(x, y, z);
 }
 
 bool collidesAt(const World &world, float px, float py, float pz, float playerHeight)
@@ -263,9 +285,13 @@ HitInfo raycast(const World &world, float ox, float oy, float oz, float dx, floa
             }
         }
 
-        if (world.inside(x, y, z) && isSolid(world.get(x, y, z)))
+        if (world.inside(x, y, z))
         {
-            return {x, y, z, nx, ny, nz, true};
+            BlockType b = world.get(x, y, z);
+            if (isSolid(b) || b == BlockType::Sign)
+            {
+                return {x, y, z, nx, ny, nz, true};
+            }
         }
     }
     return {0, 0, 0, 0, 0, 0, false};
