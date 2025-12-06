@@ -1659,9 +1659,11 @@ int main()
     const float PLAYER_HEIGHT = 1.7f;
     const float EYE_HEIGHT = PLAYER_HEIGHT * 0.8f;
     const float SPEED = 32.0f;
-    const float JUMP = 8.0f;
+    const float JUMP = 20.0f;
     const float GRAVITY = -48.0f;
     const float SPRINT_MULT = 1.6f;
+    const float FLY_SPRINT_MULT = 2.4f;
+    const float FLY_VERTICAL_MULT = 0.2f;
     const float SPRINT_DOUBLE_TAP = 0.3f;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0)
@@ -1774,7 +1776,9 @@ int main()
     float smoothDY = 0.0f;
     float elapsedTime = 0.0f;
     float lastForwardTap = -1.0f;
+    float lastSpaceTap = -1.0f;
     bool sprinting = false;
+    bool flying = false;
     SDL_SetRelativeMouseMode(SDL_TRUE);
     SDL_ShowCursor(SDL_FALSE);
 
@@ -1908,6 +1912,16 @@ int main()
                 {
                     gSignEditOpen = false;
                     SDL_StopTextInput();
+                }
+                else if (!gSignEditOpen && !pauseMenuOpen && e.key.keysym.sym == SDLK_SPACE && e.key.repeat == 0)
+                {
+                    if (lastSpaceTap >= 0.0f && (elapsedTime - lastSpaceTap) <= SPRINT_DOUBLE_TAP)
+                    {
+                        flying = !flying;
+                        if (flying)
+                            player.vy = 0.0f;
+                    }
+                    lastSpaceTap = elapsedTime;
                 }
                 else if (!gSignEditOpen && (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
                 {
@@ -2177,9 +2191,10 @@ int main()
         float simDt = (pauseMenuOpen || gSignEditOpen) ? 0.0f : dt;
 
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
-        Vec3 fwd = forwardVec(player.yaw, player.pitch);
+        // Movement uses a purely horizontal forward vector (independent of pitch)
+        Vec3 fwd{std::sin(player.yaw), 0.0f, -std::cos(player.yaw)};
         Vec3 right{std::cos(player.yaw), 0.0f, std::sin(player.yaw)};
-        float moveSpeed = SPEED * (sprinting ? SPRINT_MULT : 1.0f);
+        float moveSpeed = SPEED * (sprinting ? (flying ? FLY_SPRINT_MULT : SPRINT_MULT) : 1.0f);
         bool forwardHeld = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_Z];
 
         if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen)
@@ -2204,24 +2219,47 @@ int main()
                 player.vx += right.x * moveSpeed * simDt;
                 player.vz += right.z * moveSpeed * simDt;
             }
-            if (keys[SDL_SCANCODE_SPACE])
+
+            if (flying)
             {
-                player.vy = JUMP;
+                // Vol : Espace monte, Shift descend, sans gravité
+                player.vy = 0.0f;
+                float flyVertSpeed = moveSpeed * FLY_VERTICAL_MULT;
+                if (keys[SDL_SCANCODE_SPACE])
+                {
+                    player.vy = flyVertSpeed;
+                }
+                else if (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT])
+                {
+                    player.vy = -flyVertSpeed;
+                }
             }
-            if (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT])
+            else
             {
-                player.vy = -JUMP;
+                // Sol : saut unique tant qu'on est au sol (pas de montée infinie en maintenant Espace)
+                bool onGround =
+                    collidesAt(world, player.x, player.y - 0.05f, player.z, PLAYER_HEIGHT);
+                if (keys[SDL_SCANCODE_SPACE] && onGround)
+                {
+                    player.vy = JUMP;
+                }
+                if (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT])
+                {
+                    player.vy = -JUMP;
+                }
             }
         }
         if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen)
         {
             sprinting = false;
         }
-        player.vy += GRAVITY * simDt;
+        if (!flying)
+            player.vy += GRAVITY * simDt;
 
         float nextY = player.y + player.vy * simDt;
         nextY = std::clamp(nextY, PLAYER_HEIGHT * 0.5f, HEIGHT - 2.0f);
-        if (collidesAt(world, player.x, nextY, player.z, PLAYER_HEIGHT))
+        bool hitVertical = collidesAt(world, player.x, nextY, player.z, PLAYER_HEIGHT);
+        if (hitVertical)
         {
             if (player.vy < 0.0f)
             {
@@ -2254,6 +2292,14 @@ int main()
         player.x = nextX;
         player.y = nextY;
         player.z = nextZ;
+
+        // If we touched the ground while flying, disable fly mode
+        bool onGroundNow = collidesAt(world, player.x, player.y - 0.05f, player.z, PLAYER_HEIGHT);
+        if (flying && onGroundNow)
+        {
+            flying = false;
+            player.vy = 0.0f;
+        }
 
         player.vx *= 0.85f;
         player.vy *= 0.85f;
