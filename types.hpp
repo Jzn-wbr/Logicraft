@@ -102,7 +102,9 @@ struct Vertex
 struct ChunkMesh
 {
     std::vector<Vertex> verts;
+    std::vector<Vertex> glassVerts;
     GLuint vbo = 0;
+    GLuint glassVbo = 0;
     bool dirty = true;
 };
 

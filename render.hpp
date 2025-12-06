@@ -29,7 +29,7 @@ int chunkIndex(int cx, int cy, int cz);
 void markAllChunksDirty();
 void markChunkFromBlock(int x, int y, int z);
 void markNeighborsDirty(int x, int y, int z);
-void ensureVbo(ChunkMesh &m);
+void ensureVbo(GLuint &vbo);
 int tileIndexFor(BlockType b);
 void createAtlasTexture();
 GLuint loadTextureFromBMP(const std::string &path);

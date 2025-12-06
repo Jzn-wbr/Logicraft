@@ -338,7 +338,10 @@ void drawFaceHighlight(const HitInfo &hit)
 {
     if (!hit.hit)
         return;
-    glColor4f(0.3f, 0.3f, 0.3f, 0.45f);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glColor4f(0.35f, 0.35f, 0.35f, 0.34f);
 
     Vec3 n{static_cast<float>(hit.nx), static_cast<float>(hit.ny), static_cast<float>(hit.nz)};
     Vec3 u{0.0f, 0.0f, 0.0f};
@@ -383,6 +386,8 @@ void drawFaceHighlight(const HitInfo &hit)
     glVertex3f(p3.x, p3.y, p3.z);
     glVertex3f(p4.x, p4.y, p4.z);
     glEnd();
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
 }
 
 // HUD helpers for 2D overlay
@@ -995,7 +1000,8 @@ void refreshSaveList()
             continue;
         entries.push_back({p.last_write_time(), p.path().string()});
     }
-    std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+    std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b)
+              { return a.first > b.first; });
     for (auto &e : entries)
         gSaveList.push_back(e.second);
     if (!gSaveList.empty())
@@ -1168,16 +1174,165 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         break;
     }
     case BlockType::Air:
-    case BlockType::Grass:
-    case BlockType::Dirt:
-    case BlockType::Stone:
-    case BlockType::Wood:
-    case BlockType::Leaves:
-    case BlockType::Water:
-    case BlockType::Plank:
-    case BlockType::Sand:
-    case BlockType::Glass:
         break;
+    case BlockType::Grass:
+    {
+        // simple blades of grass (no background square)
+        glColor4f(0.12f, 0.55f, 0.18f, 0.35f);
+        drawQuad(x + slotSize * 0.1f, y + slotSize * 0.55f, slotSize * 0.8f, slotSize * 0.25f, 0.12f, 0.55f, 0.18f,
+                 0.25f);
+        glColor4f(0.1f, 0.9f, 0.3f, 0.95f);
+        glLineWidth(2.0f);
+        glBegin(GL_LINES);
+        float baseY = y + slotSize * 0.78f;
+        for (int i = 0; i < 8; ++i)
+        {
+            float t = static_cast<float>(i) / 7.0f;
+            float gx = x + slotSize * 0.15f + t * slotSize * 0.7f;
+            float sway = (i % 2 == 0) ? -0.05f : 0.05f;
+            glVertex2f(gx, baseY);
+            glVertex2f(gx + slotSize * sway, baseY - slotSize * (0.25f + 0.1f * t));
+        }
+        glEnd();
+        glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::Dirt:
+    {
+        // muddy dirt patch
+        drawQuad(x + slotSize * 0.18f, y + slotSize * 0.45f, slotSize * 0.64f, slotSize * 0.28f, 0.36f, 0.23f, 0.12f,
+                 0.8f);
+        drawQuad(x + slotSize * 0.25f, y + slotSize * 0.52f, slotSize * 0.3f, slotSize * 0.12f, 0.28f, 0.18f, 0.1f,
+                 0.8f);
+        drawQuad(x + slotSize * 0.52f, y + slotSize * 0.42f, slotSize * 0.16f, slotSize * 0.08f, 0.22f, 0.14f, 0.08f,
+                 0.75f);
+        break;
+    }
+    case BlockType::Stone:
+    {
+        // brick-like pattern without solid square
+        glColor4f(0.6f, 0.6f, 0.65f, 0.25f);
+        glBegin(GL_LINES);
+        // horizontal courses
+        float y1 = y + slotSize * 0.35f;
+        float y2 = y + slotSize * 0.6f;
+        glVertex2f(x + slotSize * 0.1f, y1);
+        glVertex2f(x + slotSize * 0.9f, y1);
+        glVertex2f(x + slotSize * 0.1f, y2);
+        glVertex2f(x + slotSize * 0.9f, y2);
+        // vertical offsets (staggered)
+        glVertex2f(x + slotSize * 0.3f, y1);
+        glVertex2f(x + slotSize * 0.3f, y);
+        glVertex2f(x + slotSize * 0.7f, y1);
+        glVertex2f(x + slotSize * 0.7f, y);
+        glVertex2f(x + slotSize * 0.2f, y2);
+        glVertex2f(x + slotSize * 0.2f, y1);
+        glVertex2f(x + slotSize * 0.6f, y2);
+        glVertex2f(x + slotSize * 0.6f, y1);
+        glVertex2f(x + slotSize * 0.9f, y2);
+        glVertex2f(x + slotSize * 0.9f, y1);
+        glEnd();
+        glColor4f(0.25f, 0.25f, 0.3f, 0.4f);
+        glBegin(GL_LINES);
+        glVertex2f(x + slotSize * 0.1f, y);
+        glVertex2f(x + slotSize * 0.1f, y + slotSize);
+        glVertex2f(x + slotSize * 0.9f, y);
+        glVertex2f(x + slotSize * 0.9f, y + slotSize);
+        glEnd();
+        break;
+    }
+    case BlockType::Wood:
+    {
+        // simple tree trunk + side log, no background square
+        float trunkW = slotSize * 0.28f;
+        float trunkH = slotSize * 0.62f;
+        float trunkX = x + slotSize * 0.22f;
+        float trunkY = y + slotSize * 0.25f;
+        drawQuad(trunkX, trunkY, trunkW, trunkH, 0.45f, 0.32f, 0.16f, 0.9f);
+        glColor4f(0.2f, 0.12f, 0.07f, 0.8f);
+        glBegin(GL_LINES);
+        glVertex2f(trunkX + trunkW * 0.33f, trunkY);
+        glVertex2f(trunkX + trunkW * 0.33f, trunkY + trunkH);
+        glVertex2f(trunkX + trunkW * 0.66f, trunkY);
+        glVertex2f(trunkX + trunkW * 0.66f, trunkY + trunkH);
+        glEnd();
+
+        // side log with rings
+        float logX = x + slotSize * 0.55f;
+        float logY = y + slotSize * 0.35f;
+        float logW = slotSize * 0.28f;
+        float logH = slotSize * 0.2f;
+        drawQuad(logX, logY, logW, logH, 0.55f, 0.4f, 0.22f, 0.9f);
+        glColor4f(0.25f, 0.16f, 0.09f, 0.9f);
+        glBegin(GL_LINE_LOOP);
+        glVertex2f(logX, logY);
+        glVertex2f(logX + logW, logY);
+        glVertex2f(logX + logW, logY + logH);
+        glVertex2f(logX, logY + logH);
+        glEnd();
+        glBegin(GL_LINES);
+        glVertex2f(logX + logW * 0.25f, logY);
+        glVertex2f(logX + logW * 0.25f, logY + logH);
+        glVertex2f(logX + logW * 0.55f, logY);
+        glVertex2f(logX + logW * 0.55f, logY + logH);
+        glEnd();
+        break;
+    }
+    case BlockType::Leaves:
+    {
+        float pad = slotSize * 0.18f;
+        drawQuad(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 0.2f, 0.55f, 0.25f, 0.9f);
+        drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 0.0f, 0.0f, 0.0f, 0.35f, 2.0f);
+        drawQuad(x + slotSize * 0.2f, y + slotSize * 0.2f, slotSize * 0.6f, slotSize * 0.6f, 0.18f, 0.46f, 0.2f, 0.4f);
+        break;
+    }
+    case BlockType::Water:
+    {
+        drawQuad(x, y, slotSize, slotSize, 0.1f, 0.35f, 0.85f, 0.55f);
+        drawOutline(x, y, slotSize, slotSize, 0.2f, 0.6f, 1.0f, 0.4f, 2.0f);
+        glColor4f(0.6f, 0.8f, 1.0f, 0.8f);
+        glBegin(GL_LINES);
+        glVertex2f(x + slotSize * 0.2f, y + slotSize * 0.35f);
+        glVertex2f(x + slotSize * 0.8f, y + slotSize * 0.35f);
+        glVertex2f(x + slotSize * 0.25f, y + slotSize * 0.55f);
+        glVertex2f(x + slotSize * 0.75f, y + slotSize * 0.55f);
+        glEnd();
+        break;
+    }
+    case BlockType::Plank:
+    {
+        float pad = slotSize * 0.18f;
+        drawQuad(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 0.75f, 0.6f, 0.35f, 0.9f);
+        drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 0.0f, 0.0f, 0.0f, 0.35f, 2.0f);
+        glColor4f(0.35f, 0.25f, 0.15f, 0.7f);
+        glBegin(GL_LINES);
+        glVertex2f(x + slotSize * 0.2f, y + slotSize * 0.4f);
+        glVertex2f(x + slotSize * 0.8f, y + slotSize * 0.4f);
+        glVertex2f(x + slotSize * 0.2f, y + slotSize * 0.6f);
+        glVertex2f(x + slotSize * 0.8f, y + slotSize * 0.6f);
+        glEnd();
+        break;
+    }
+    case BlockType::Sand:
+    {
+        float pad = slotSize * 0.18f;
+        drawQuad(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 0.88f, 0.78f, 0.48f, 0.9f);
+        drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 0.0f, 0.0f, 0.0f, 0.35f, 2.0f);
+        drawQuad(x + slotSize * 0.3f, y + slotSize * 0.6f, slotSize * 0.15f, slotSize * 0.08f, 0.8f, 0.7f, 0.4f, 0.6f);
+        drawQuad(x + slotSize * 0.55f, y + slotSize * 0.4f, slotSize * 0.18f, slotSize * 0.1f, 0.8f, 0.7f, 0.4f, 0.6f);
+        break;
+    }
+    case BlockType::Glass:
+    {
+        drawQuad(x, y, slotSize, slotSize, 0.7f, 0.9f, 1.0f, 0.18f);
+        drawOutline(x, y, slotSize, slotSize, 0.8f, 0.95f, 1.0f, 0.4f, 2.0f);
+        glColor4f(0.4f, 0.7f, 0.9f, 0.5f);
+        glBegin(GL_LINES);
+        glVertex2f(x + slotSize * 0.2f, y + slotSize * 0.2f);
+        glVertex2f(x + slotSize * 0.8f, y + slotSize * 0.8f);
+        glEnd();
+        break;
+    }
     default:
         break;
     }
@@ -1563,7 +1718,8 @@ int main()
                         sy = 0;
                     // Find the first free spot above surface if blocked
                     int checkY = sy + 1;
-                    auto blockedAt = [&](int y) {
+                    auto blockedAt = [&](int y)
+                    {
                         if (y < 0 || y + 1 >= world.getHeight())
                             return true;
                         return isSolid(world.get(sx, y, sz)) || isSolid(world.get(sx, y + 1, sz));
@@ -1786,11 +1942,11 @@ int main()
                             }
                             pendingSlot = -1;
                         }
-                        }
                     }
-                    else
-                    {
-                        Vec3 fwd = forwardVec(player.yaw, player.pitch);
+                }
+                else
+                {
+                    Vec3 fwd = forwardVec(player.yaw, player.pitch);
                     float eyeY = player.y + EYE_HEIGHT;
                     HitInfo hit = raycast(world, player.x, eyeY, player.z, fwd.x, fwd.y, fwd.z, 8.0f);
                     if (hit.hit)
@@ -1973,6 +2129,32 @@ int main()
                 }
             }
         }
+        // Glass pass
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+        for (int cY = 0; cY < CHUNK_Y_COUNT; ++cY)
+        {
+            for (int cZ = 0; cZ < CHUNK_Z_COUNT; ++cZ)
+            {
+                for (int cX = 0; cX < CHUNK_X_COUNT; ++cX)
+                {
+                    int idx = chunkIndex(cX, cY, cZ);
+                    if (idx < 0)
+                        continue;
+                    const ChunkMesh &cm = chunkMeshes[idx];
+                    if (cm.glassVerts.empty())
+                        continue;
+                    glBindBuffer(GL_ARRAY_BUFFER, cm.glassVbo);
+                    glVertexPointer(3, GL_FLOAT, sizeof(Vertex), reinterpret_cast<void *>(0));
+                    glTexCoordPointer(2, GL_FLOAT, sizeof(Vertex), reinterpret_cast<void *>(sizeof(float) * 3));
+                    glColorPointer(3, GL_FLOAT, sizeof(Vertex), reinterpret_cast<void *>(sizeof(float) * 5));
+                    glDrawArrays(GL_QUADS, 0, static_cast<GLsizei>(cm.glassVerts.size()));
+                }
+            }
+        }
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
         glBindTexture(GL_TEXTURE_2D, 0);
         glDisable(GL_TEXTURE_2D);
         glBindBuffer(GL_ARRAY_BUFFER, 0);

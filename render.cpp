@@ -57,11 +57,11 @@ void markNeighborsDirty(int x, int y, int z)
     }
 }
 
-void ensureVbo(ChunkMesh &m)
+void ensureVbo(GLuint &vbo)
 {
-    if (m.vbo == 0)
+    if (vbo == 0)
     {
-        glGenBuffers(1, &m.vbo);
+        glGenBuffers(1, &vbo);
     }
 }
 
@@ -101,41 +101,51 @@ void fillTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array
     {
         for (int x = 0; x < ATLAS_TILE_SIZE; ++x)
         {
-            float n = hashNoise(x, y + tileIdx * 17, styleSeed);
-            float shade = 0.85f + n * 0.25f;
-            float r = std::clamp(baseColor[0] * shade, 0.0f, 1.0f);
-            float g = std::clamp(baseColor[1] * shade, 0.0f, 1.0f);
-            float b = std::clamp(baseColor[2] * shade, 0.0f, 1.0f);
-
-            if ((styleSeed % 3 == 0) && (y % 8 == 0))
-                shade *= 0.92f;
-            if ((styleSeed % 4 == 1) && (x % 6 == 0))
-                shade *= 0.9f;
-            r = std::clamp(baseColor[0] * shade, 0.0f, 1.0f);
-            g = std::clamp(baseColor[1] * shade, 0.0f, 1.0f);
-            b = std::clamp(baseColor[2] * shade, 0.0f, 1.0f);
-
-            if (styleSeed == 99)
+            if (styleSeed == 88)
             {
-                float wave = std::sin((x + y * 0.6f) * 0.2f) * 0.04f;
-                r = std::clamp(r + wave, 0.0f, 1.0f);
-                g = std::clamp(g + wave, 0.0f, 1.0f);
-                b = std::clamp(b + wave * 1.6f, 0.0f, 1.0f);
+                // Glass: uniform tint, very transparent
+                uint8_t R = static_cast<uint8_t>(baseColor[0] * 255.0f);
+                uint8_t G = static_cast<uint8_t>(baseColor[1] * 255.0f);
+                uint8_t B = static_cast<uint8_t>(baseColor[2] * 255.0f);
+                uint8_t A = 60;
+                writePixel(pix, texW, x0 + x, y0 + y, R, G, B, A);
             }
+            else
+            {
+                float n = hashNoise(x, y + tileIdx * 17, styleSeed);
+                float shade = 0.85f + n * 0.25f;
+                float r = std::clamp(baseColor[0] * shade, 0.0f, 1.0f);
+                float g = std::clamp(baseColor[1] * shade, 0.0f, 1.0f);
+                float b = std::clamp(baseColor[2] * shade, 0.0f, 1.0f);
 
-            uint8_t R = static_cast<uint8_t>(r * 255.0f);
-            uint8_t G = static_cast<uint8_t>(g * 255.0f);
-            uint8_t B = static_cast<uint8_t>(b * 255.0f);
-            uint8_t A = 255;
-            if (styleSeed == 99)
-                A = 180;
-            else if (styleSeed == 88)
-                A = 120;
-            else if (styleSeed == 17)
-                A = 220;
-            else if (styleSeed == 19)
-                A = 255;
-            writePixel(pix, texW, x0 + x, y0 + y, R, G, B, A);
+                if ((styleSeed % 3 == 0) && (y % 8 == 0))
+                    shade *= 0.92f;
+                if ((styleSeed % 4 == 1) && (x % 6 == 0))
+                    shade *= 0.9f;
+                r = std::clamp(baseColor[0] * shade, 0.0f, 1.0f);
+                g = std::clamp(baseColor[1] * shade, 0.0f, 1.0f);
+                b = std::clamp(baseColor[2] * shade, 0.0f, 1.0f);
+
+                if (styleSeed == 99)
+                {
+                    float wave = std::sin((x + y * 0.6f) * 0.2f) * 0.04f;
+                    r = std::clamp(r + wave, 0.0f, 1.0f);
+                    g = std::clamp(g + wave, 0.0f, 1.0f);
+                    b = std::clamp(b + wave * 1.6f, 0.0f, 1.0f);
+                }
+
+                uint8_t R = static_cast<uint8_t>(r * 255.0f);
+                uint8_t G = static_cast<uint8_t>(g * 255.0f);
+                uint8_t B = static_cast<uint8_t>(b * 255.0f);
+                uint8_t A = 255;
+                if (styleSeed == 99)
+                    A = 180;
+                else if (styleSeed == 17)
+                    A = 220;
+                else if (styleSeed == 19)
+                    A = 255;
+                writePixel(pix, texW, x0 + x, y0 + y, R, G, B, A);
+            }
         }
     }
 }
@@ -427,6 +437,7 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
         return;
     ChunkMesh &mesh = chunkMeshes[idx];
     mesh.verts.clear();
+    mesh.glassVerts.clear();
     int x0 = cx * CHUNK_SIZE;
     int y0 = cy * CHUNK_SIZE;
     int z0 = cz * CHUNK_SIZE;
@@ -435,8 +446,9 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
     int z1 = std::min(world.getDepth(), z0 + CHUNK_SIZE);
 
     auto addFace = [&](int x, int y, int z, const int nx, const int ny, const int nz, const std::array<float, 3> &col,
-                       int tile)
+                       int tile, bool toGlass)
     {
+        auto &vec = toGlass ? mesh.glassVerts : mesh.verts;
         float bx = static_cast<float>(x);
         float by = static_cast<float>(y);
         float bz = static_cast<float>(z);
@@ -455,7 +467,7 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
         float v1 = (ty + 1) * dv - pad;
 
         auto push = [&](float px, float py, float pz, float u, float v)
-        { mesh.verts.push_back(Vertex{px, py, pz, u, v, br, bg, bb}); };
+        { vec.push_back(Vertex{px, py, pz, u, v, br, bg, bb}); };
 
         if (nx == 1)
         {
@@ -656,27 +668,43 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     continue;
                 }
 
-                if (x == 0 || !occludesFaces(world.get(x - 1, y, z)))
-                    addFace(x, y, z, -1, 0, 0, color, faceTile(-1, 0, 0));
-                if (x == world.getWidth() - 1 || !occludesFaces(world.get(x + 1, y, z)))
-                    addFace(x, y, z, 1, 0, 0, color, faceTile(1, 0, 0));
-                if (y == 0 || !occludesFaces(world.get(x, y - 1, z)))
-                    addFace(x, y, z, 0, -1, 0, color, faceTile(0, -1, 0));
-                if (y == world.getHeight() - 1 || !occludesFaces(world.get(x, y + 1, z)))
-                    addFace(x, y, z, 0, 1, 0, color, faceTile(0, 1, 0));
-                if (z == 0 || !occludesFaces(world.get(x, y, z - 1)))
-                    addFace(x, y, z, 0, 0, -1, color, faceTile(0, 0, -1));
-                if (z == world.getDepth() - 1 || !occludesFaces(world.get(x, y, z + 1)))
-                    addFace(x, y, z, 0, 0, 1, color, faceTile(0, 0, 1));
+                bool isGlass = (b == BlockType::Glass);
+                auto neighborIsGlass = [&](int nx, int ny, int nz) {
+                    if (!world.inside(nx, ny, nz))
+                        return false;
+                    return world.get(nx, ny, nz) == BlockType::Glass;
+                };
+
+                if (x == 0 || (!occludesFaces(world.get(x - 1, y, z)) && !(isGlass && neighborIsGlass(x - 1, y, z))))
+                    addFace(x, y, z, -1, 0, 0, color, faceTile(-1, 0, 0), isGlass);
+                if (x == world.getWidth() - 1 ||
+                    (!occludesFaces(world.get(x + 1, y, z)) && !(isGlass && neighborIsGlass(x + 1, y, z))))
+                    addFace(x, y, z, 1, 0, 0, color, faceTile(1, 0, 0), isGlass);
+                if (y == 0 || (!occludesFaces(world.get(x, y - 1, z)) && !(isGlass && neighborIsGlass(x, y - 1, z))))
+                    addFace(x, y, z, 0, -1, 0, color, faceTile(0, -1, 0), isGlass);
+                if (y == world.getHeight() - 1 ||
+                    (!occludesFaces(world.get(x, y + 1, z)) && !(isGlass && neighborIsGlass(x, y + 1, z))))
+                    addFace(x, y, z, 0, 1, 0, color, faceTile(0, 1, 0), isGlass);
+                if (z == 0 || (!occludesFaces(world.get(x, y, z - 1)) && !(isGlass && neighborIsGlass(x, y, z - 1))))
+                    addFace(x, y, z, 0, 0, -1, color, faceTile(0, 0, -1), isGlass);
+                if (z == world.getDepth() - 1 ||
+                    (!occludesFaces(world.get(x, y, z + 1)) && !(isGlass && neighborIsGlass(x, y, z + 1))))
+                    addFace(x, y, z, 0, 0, 1, color, faceTile(0, 0, 1), isGlass);
             }
         }
     }
 
-    ensureVbo(mesh);
+    ensureVbo(mesh.vbo);
+    ensureVbo(mesh.glassVbo);
     if (!mesh.verts.empty())
     {
         glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
         glBufferData(GL_ARRAY_BUFFER, mesh.verts.size() * sizeof(Vertex), mesh.verts.data(), GL_STATIC_DRAW);
+    }
+    if (!mesh.glassVerts.empty())
+    {
+        glBindBuffer(GL_ARRAY_BUFFER, mesh.glassVbo);
+        glBufferData(GL_ARRAY_BUFFER, mesh.glassVerts.size() * sizeof(Vertex), mesh.glassVerts.data(), GL_STATIC_DRAW);
     }
     mesh.dirty = false;
 }
