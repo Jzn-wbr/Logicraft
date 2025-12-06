@@ -1856,6 +1856,20 @@ int main()
                     SDL_ShowCursor(inventoryOpen ? SDL_TRUE : SDL_FALSE);
                     smoothDX = smoothDY = 0.0f;
                 }
+                else if (e.key.keysym.sym == SDLK_F11)
+                {
+                    Uint32 flags = SDL_GetWindowFlags(window);
+                    bool isFullscreen =
+                        (flags & SDL_WINDOW_FULLSCREEN) || (flags & SDL_WINDOW_FULLSCREEN_DESKTOP);
+                    if (!isFullscreen)
+                    {
+                        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                    }
+                    else
+                    {
+                        SDL_SetWindowFullscreen(window, 0);
+                    }
+                }
                 else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen)
                 {
                     float spawnX = WIDTH * 0.5f;
