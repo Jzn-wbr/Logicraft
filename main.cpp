@@ -2443,7 +2443,7 @@ int main()
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, gAtlasTex);
-        const float chunkView = 28.0f;
+        const float chunkView = 56.0f;
         for (int cY = 0; cY < CHUNK_Y_COUNT; ++cY)
         {
             for (int cZ = 0; cZ < CHUNK_Z_COUNT; ++cZ)
