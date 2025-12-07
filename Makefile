@@ -1,4 +1,4 @@
-APP := messercraft
+APP := sigmacraft
 SRC := main.cpp world.cpp render.cpp
 OBJ := $(SRC:.cpp=.o)
 
