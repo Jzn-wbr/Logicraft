@@ -25,6 +25,7 @@ int gXorTopTile = 0;
 int gDffTopTile = 0;
 int gAddTopTile = 0;
 int gAddBottomTile = 0;
+int gAddBackTile = 0;
 int gCounterTopTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 7;
@@ -423,6 +424,19 @@ void fillAddBottomTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const s
     blitTinyTextToTile(pix, texW, tileIdx, x - tileX, y - tileY, "C OUT", scale, 245, 245, 245, 255);
 }
 
+void fillAddBackTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
+                     int styleSeed)
+{
+    fillTile(pix, texW, tileIdx, baseColor, styleSeed);
+    int scale = 1;
+    int cinWidth = tinyTextWidthOnTile("C IN", scale);
+    int tileX = (tileIdx % ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int tileY = (tileIdx / ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int x = tileX + (ATLAS_TILE_SIZE - cinWidth) / 2;
+    int y = tileY + (ATLAS_TILE_SIZE - 5 * scale) / 2;
+    blitTinyTextToTile(pix, texW, tileIdx, x - tileX, y - tileY, "C IN", scale, 245, 245, 245, 255);
+}
+
 void fillCounterTopTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
                         int styleSeed)
 {
@@ -652,6 +666,7 @@ void createAtlasTexture()
     gDffTopTile = nextTile++;
     gAddTopTile = nextTile++;
     gAddBottomTile = nextTile++;
+    gAddBackTile = nextTile++;
     gCounterTopTile = nextTile++;
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
@@ -661,7 +676,8 @@ void createAtlasTexture()
     for (const auto &kv : gBlockTile)
         maxTileIdx = std::max(maxTileIdx, kv.second);
     maxTileIdx = std::max(maxTileIdx, std::max(std::max(gAndTopTile, gOrTopTile), gXorTopTile));
-    maxTileIdx = std::max(maxTileIdx, std::max(std::max(gDffTopTile, gAddTopTile), gAddBottomTile));
+    maxTileIdx = std::max(maxTileIdx,
+                          std::max(std::max(gDffTopTile, gAddTopTile), std::max(gAddBottomTile, gAddBackTile)));
     maxTileIdx = std::max(maxTileIdx, gCounterTopTile);
     if (maxTileIdx >= atlasCapacity)
     {
@@ -701,6 +717,7 @@ void createAtlasTexture()
     fillDffTopTile(pixels, texW, gDffTopTile, base(BlockType::DFlipFlop), 23);
     fillAddTopTile(pixels, texW, gAddTopTile, base(BlockType::AddGate), 25);
     fillAddBottomTile(pixels, texW, gAddBottomTile, base(BlockType::AddGate), 25);
+    fillAddBackTile(pixels, texW, gAddBackTile, base(BlockType::AddGate), 25);
     fillCounterTopTile(pixels, texW, gCounterTopTile, base(BlockType::Counter), 12);
 
     if (gAtlasTex == 0)
@@ -921,6 +938,8 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     }
                     if (ny == -1 && b == BlockType::AddGate)
                         return gAddBottomTile;
+                    if (nz == -1 && b == BlockType::AddGate)
+                        return gAddBackTile;
                     return tIdx;
                 };
                 if (b == BlockType::Wire)

@@ -396,8 +396,8 @@ void updateLogic(World &world)
                 case BlockType::DFlipFlop:
                 {
                     uint8_t storedQ = world.getPower(x, y, z);
-                    uint8_t dIn = powerAt(x + 1, y, z) ? 1 : 0; // D on +X
-                    uint8_t clk = powerAt(x - 1, y, z) ? 1 : 0; // CLK on -X
+                    uint8_t dIn = powerAt(x + 1, y, z);        // D on +X (full 8-bit)
+                    uint8_t clk = powerAt(x - 1, y, z) ? 1 : 0; // CLK on -X (bool)
                     uint8_t prevClk = world.getButtonState(x, y, z) ? 1 : 0;
                     uint8_t nextQ = storedQ;
                     if (clk && !prevClk)

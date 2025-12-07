@@ -1987,7 +1987,17 @@ int main()
             {
                 if (e.key.keysym.sym == SDLK_ESCAPE)
                 {
-                    if (pauseMenuOpen)
+                    if (gSignEditOpen)
+                    {
+                        gSignEditOpen = false;
+                        SDL_StopTextInput();
+                    }
+                    else if (gButtonEditOpen)
+                    {
+                        gButtonEditOpen = false;
+                        SDL_StopTextInput();
+                    }
+                    else if (pauseMenuOpen)
                     {
                         pauseMenuOpen = false;
                         saveMenuOpen = false;
