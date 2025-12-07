@@ -28,7 +28,8 @@ enum class BlockType
     Wire,
     Sign,
     DFlipFlop,
-    AddGate
+    AddGate,
+    Counter
 };
 
 struct BlockInfo

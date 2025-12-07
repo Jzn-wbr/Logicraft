@@ -922,13 +922,31 @@ void drawSignEditBox(int winW, int winH, const std::string &text)
     drawTextTiny(tx + padding, ty + padding, size, display, 1.0f, 0.95f, 0.85f, 1.0f);
 }
 
+void drawButtonEditBox(int winW, int winH, const std::string &text)
+{
+    float boxW = 360.0f;
+    float boxH = 180.0f;
+    float x = (winW - boxW) * 0.5f;
+    float y = (winH - boxH) * 0.5f;
+    drawQuad(x - 6.0f, y - 6.0f, boxW + 12.0f, boxH + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f);
+    drawQuad(x, y, boxW, boxH, 0.05f, 0.05f, 0.06f, 0.9f);
+    drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+    float textX = x + 18.0f;
+    float textY = y + 20.0f;
+    drawTextTiny(textX, textY, 2.0f, "Valeur du bouton (0-255)", 1.0f, 0.95f, 0.85f, 1.0f);
+    drawQuad(textX, textY + 22.0f, boxW - 36.0f, 36.0f, 0.12f, 0.12f, 0.14f, 0.85f);
+    drawOutline(textX, textY + 22.0f, boxW - 36.0f, 36.0f, 1.0f, 1.0f, 1.0f, 0.25f, 2.0f);
+    drawTextTiny(textX + 6.0f, textY + 32.0f, 2.0f, text.empty() ? "0" : text, 1.0f, 1.0f, 1.0f, 1.0f);
+    drawTextTiny(textX, textY + 70.0f, 1.5f, "Entrer pour valider, Esc pour annuler", 0.85f, 0.85f, 0.85f, 1.0f);
+}
+
 // ---------- Save / Load ----------
 static const char *MAPS_DIR = "maps";
 
 struct SaveHeader
 {
     char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
-    uint32_t version = 5;
+    uint32_t version = 6;
     uint32_t w = 0, h = 0, d = 0;
     uint32_t seed = 0;
 };
@@ -954,9 +972,11 @@ bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
         uint8_t b = static_cast<uint8_t>(world.get(x, y, z));
         uint8_t p = world.getPower(x, y, z);
         uint8_t btn = world.getButtonState(x, y, z);
+        uint8_t btnVal = world.getButtonValue(x, y, z);
         out.write(reinterpret_cast<const char *>(&b), 1);
         out.write(reinterpret_cast<const char *>(&p), 1);
         out.write(reinterpret_cast<const char *>(&btn), 1);
+        out.write(reinterpret_cast<const char *>(&btnVal), 1);
     }
 
     // Save sign texts (only for version >= 2)
@@ -998,7 +1018,8 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     in.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));
     if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
         return false;
-    if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3 && hdr.version != 4 && hdr.version != 5)
+    if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3 && hdr.version != 4 && hdr.version != 5 &&
+        hdr.version != 6)
         return false;
     if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
         hdr.d != static_cast<uint32_t>(world.getDepth()))
@@ -1007,10 +1028,12 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     int total = world.totalSize();
     for (int i = 0; i < total; ++i)
     {
-        uint8_t b = 0, p = 0, btn = 0;
+        uint8_t b = 0, p = 0, btn = 0, btnVal = 255;
         in.read(reinterpret_cast<char *>(&b), 1);
         in.read(reinterpret_cast<char *>(&p), 1);
         in.read(reinterpret_cast<char *>(&btn), 1);
+        if (hdr.version >= 6)
+            in.read(reinterpret_cast<char *>(&btnVal), 1);
         if (!in)
             return false;
 
@@ -1038,6 +1061,8 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
         world.set(x, y, z, static_cast<BlockType>(b));
         world.setPower(x, y, z, p);
         world.setButtonState(x, y, z, btn);
+        if (b == static_cast<uint8_t>(BlockType::Button))
+            world.setButtonValue(x, y, z, btnVal);
     }
 
     // Load sign texts for version >= 2
@@ -1126,6 +1151,9 @@ bool gSaveInputFocus = false;
 bool gSignEditOpen = false;
 int gSignEditX = 0, gSignEditY = 0, gSignEditZ = 0;
 std::string gSignEditBuffer;
+bool gButtonEditOpen = false;
+int gButtonEditX = 0, gButtonEditY = 0, gButtonEditZ = 0;
+std::string gButtonEditBuffer;
 
 std::string stemFromPath(const std::string &path);
 
@@ -1204,10 +1232,26 @@ std::string buildSavePathFromInput(const std::string &input)
 void drawButtonStateLabels(const World &world, const Player &player, float radius)
 {
     Vec3 fwd = forwardVec(player.yaw, player.pitch);
-    Vec3 right = normalizeVec(Vec3{fwd.z, 0.0f, -fwd.x});
-    if (std::abs(right.x) < 1e-4f && std::abs(right.z) < 1e-4f)
-        right = {1.0f, 0.0f, 0.0f};
-    Vec3 up = normalizeVec(cross(right, fwd));
+    Vec3 camRight = normalizeVec(cross(fwd, Vec3{0.0f, 1.0f, 0.0f}));
+    if (std::abs(camRight.x) < 1e-4f && std::abs(camRight.z) < 1e-4f)
+        camRight = {1.0f, 0.0f, 0.0f};
+    Vec3 camUp = normalizeVec(cross(camRight, fwd));
+    // Ensure the billboard faces the camera without mirroring: flip both axes if normal points toward camera
+    Vec3 normal = cross(camRight, camUp);
+    float dot = normal.x * fwd.x + normal.y * fwd.y + normal.z * fwd.z;
+    if (dot > 0.0f)
+    {
+        camRight.x *= -1.0f;
+        camRight.y *= -1.0f;
+        camRight.z *= -1.0f;
+        camUp.x *= -1.0f;
+        camUp.y *= -1.0f;
+        camUp.z *= -1.0f;
+    }
+    // Flip vertically to keep digits upright (avoid top/bottom inversion)
+    camUp.x *= -1.0f;
+    camUp.y *= -1.0f;
+    camUp.z *= -1.0f;
     float size = 0.22f;
 
     int minX = std::max(0, static_cast<int>(std::floor(player.x - radius)));
@@ -1225,15 +1269,36 @@ void drawButtonStateLabels(const World &world, const Player &player, float radiu
         {
             for (int x = minX; x <= maxX; ++x)
             {
-                if (world.get(x, y, z) != BlockType::Button)
+                BlockType b = world.get(x, y, z);
+                if (b != BlockType::Button && b != BlockType::Counter)
                     continue;
                 Vec3 pos{static_cast<float>(x) + 0.5f, static_cast<float>(y) + 1.2f, static_cast<float>(z) + 0.5f};
-                pos.x += up.x * 0.02f;
-                pos.y += up.y * 0.02f;
-                pos.z += up.z * 0.02f;
-                int state = world.getButtonState(x, y, z) ? 1 : 0;
-                float alpha = 0.95f;
-                drawDigitBillboard(pos, size, state, right, up, 1.0f, 0.95f, 0.2f, alpha);
+                pos.x += camUp.x * 0.02f;
+                pos.y += camUp.y * 0.02f;
+                pos.z += camUp.z * 0.02f;
+                if (b == BlockType::Button)
+                {
+                    int state = world.getButtonState(x, y, z) ? 1 : 0;
+                    float alpha = 0.95f;
+                    drawDigitBillboard(pos, size, state, camRight, camUp, 1.0f, 0.95f, 0.2f, alpha);
+                }
+                else if (b == BlockType::Counter)
+                {
+                    uint8_t val = world.getPower(x, y, z);
+                    int hundreds = (val / 100) % 10;
+                    int tens = (val / 10) % 10;
+                    int ones = val % 10;
+                    float alpha = 0.95f;
+                    float spacing = size * 0.8f; // slight extra gap between digits
+                    auto offsetPos = [&](float mul) {
+                        return Vec3{pos.x + camRight.x * mul, pos.y + camRight.y * mul, pos.z + camRight.z * mul};
+                    };
+                    drawDigitBillboard(offsetPos(-spacing), size * 0.7f, hundreds, camRight, camUp, 1.0f, 1.0f, 1.0f,
+                                       alpha);
+                    // center digit: keep same axes but draw with a tiny offset to avoid overlap
+                    drawDigitBillboard(offsetPos(0.0f), size * 0.7f, tens, camRight, camUp, 1.0f, 1.0f, 1.0f, alpha);
+                    drawDigitBillboard(offsetPos(spacing), size * 0.7f, ones, camRight, camUp, 1.0f, 1.0f, 1.0f, alpha);
+                }
             }
         }
     }
@@ -1341,6 +1406,21 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         float textX = x + (slotSize - textWidth) * 0.5f;
         float textY = y + slotSize * 0.4f;
         drawTextTiny(textX, textY, txtSize, "NOT", 1.0f, 1.0f, 1.0f, 1.0f);
+        glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::Counter:
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glLineWidth(2.0f);
+        float padCtr = slotSize * 0.25f;
+        drawOutline(x + padCtr, y + padCtr, slotSize - padCtr * 2, slotSize - padCtr * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
+        float txtSize = 2.0f;
+        float textWidth =
+            static_cast<float>(std::strlen("?")) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
+        float textX = x + (slotSize - textWidth) * 0.5f;
+        float textY = y + slotSize * 0.35f;
+        drawTextTiny(textX, textY, txtSize, "?", 1.0f, 1.0f, 1.0f, 1.0f);
         glLineWidth(1.0f);
         break;
     }
@@ -1881,7 +1961,7 @@ int main()
         }
 
         // Applique la souris lissée ici pour stabiliser la camera
-        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen)
+        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen)
         {
             const float sensitivity = 0.011f;
             player.yaw += smoothDX * sensitivity;
@@ -1929,7 +2009,7 @@ int main()
                         smoothDX = smoothDY = 0.0f;
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen)
+                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen)
                 {
                     inventoryOpen = !inventoryOpen;
                     pendingSlot = -1;
@@ -1951,7 +2031,7 @@ int main()
                         SDL_SetWindowFullscreen(window, 0);
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen)
+                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen && !gButtonEditOpen)
                 {
                     float spawnX = WIDTH * 0.5f;
                     float spawnZ = DEPTH * 0.5f;
@@ -1976,7 +2056,8 @@ int main()
                     player.z = spawnZ;
                     player.y = static_cast<float>(checkY) + 0.2f;
                 }
-                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_8 && !gSignEditOpen)
+                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_8 && !gSignEditOpen &&
+                         !gButtonEditOpen)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
                     if (selected >= static_cast<int>(hotbarSlots.size()))
@@ -2008,7 +2089,35 @@ int main()
                     gSignEditOpen = false;
                     SDL_StopTextInput();
                 }
-                else if (!gSignEditOpen && !pauseMenuOpen && e.key.keysym.sym == SDLK_SPACE && e.key.repeat == 0)
+                else if (gButtonEditOpen && e.key.keysym.sym == SDLK_BACKSPACE)
+                {
+                    if (!gButtonEditBuffer.empty())
+                        gButtonEditBuffer.pop_back();
+                }
+                else if (gButtonEditOpen &&
+                         (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
+                {
+                    int v = 0;
+                    try
+                    {
+                        v = std::stoi(gButtonEditBuffer.empty() ? "0" : gButtonEditBuffer);
+                    }
+                    catch (...)
+                    {
+                        v = 0;
+                    }
+                    v = std::clamp(v, 0, 255);
+                    world.setButtonValue(gButtonEditX, gButtonEditY, gButtonEditZ, static_cast<uint8_t>(v));
+                    gButtonEditOpen = false;
+                    SDL_StopTextInput();
+                }
+                else if (gButtonEditOpen && e.key.keysym.sym == SDLK_ESCAPE)
+                {
+                    gButtonEditOpen = false;
+                    SDL_StopTextInput();
+                }
+                else if (!gSignEditOpen && !gButtonEditOpen && !pauseMenuOpen &&
+                         e.key.keysym.sym == SDLK_SPACE && e.key.repeat == 0)
                 {
                     if (lastSpaceTap >= 0.0f && (elapsedTime - lastSpaceTap) <= SPRINT_DOUBLE_TAP)
                     {
@@ -2018,7 +2127,8 @@ int main()
                     }
                     lastSpaceTap = elapsedTime;
                 }
-                else if (!gSignEditOpen && (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
+                else if (!gSignEditOpen && !gButtonEditOpen &&
+                         (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
                 {
                     if (lastForwardTap >= 0.0f && (elapsedTime - lastForwardTap) <= SPRINT_DOUBLE_TAP)
                     {
@@ -2026,16 +2136,28 @@ int main()
                     }
                     lastForwardTap = elapsedTime;
                 }
-                else if (e.key.keysym.sym == SDLK_q && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen)
+                else if (e.key.keysym.sym == SDLK_q && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen &&
+                         !gButtonEditOpen)
                 {
-                    interactWithTargetBlock(world, player, EYE_HEIGHT);
+                    Vec3 fwd = forwardVec(player.yaw, player.pitch);
+                    float eyeY = player.y + EYE_HEIGHT;
+                    HitInfo hit = raycast(world, player.x, eyeY, player.z, fwd.x, fwd.y, fwd.z, 8.0f);
+                    if (hit.hit && world.get(hit.x, hit.y, hit.z) == BlockType::Button)
+                    {
+                        gButtonEditOpen = true;
+                        gButtonEditX = hit.x;
+                        gButtonEditY = hit.y;
+                        gButtonEditZ = hit.z;
+                        gButtonEditBuffer = std::to_string(world.getButtonValue(hit.x, hit.y, hit.z));
+                        SDL_StartTextInput();
+                    }
                 }
             }
             else if (e.type == SDL_MOUSEMOTION)
             {
                 mouseX = e.motion.x;
                 mouseY = e.motion.y;
-                if (!inventoryOpen && !pauseMenuOpen)
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen)
                 {
                     // Filtre de la souris pour lisser les mouvements et limiter les saccades
                     smoothDX = smoothDX * 0.6f + static_cast<float>(e.motion.xrel) * 0.4f;
@@ -2092,9 +2214,21 @@ int main()
                             gSignEditBuffer.push_back(c);
                     }
                 }
+                else if (gButtonEditOpen)
+                {
+                    const char *txt = e.text.text;
+                    for (int i = 0; txt[i] != '\0'; ++i)
+                    {
+                        char c = txt[i];
+                        if (c >= '0' && c <= '9' && gButtonEditBuffer.size() < 3)
+                            gButtonEditBuffer.push_back(c);
+                    }
+                }
             }
             else if (e.type == SDL_MOUSEBUTTONDOWN)
             {
+                if (gButtonEditOpen)
+                    continue;
                 if (pauseMenuOpen)
                 {
                     if (saveMenuOpen)
@@ -2302,7 +2436,7 @@ int main()
             }
         }
 
-        float simDt = (pauseMenuOpen || gSignEditOpen) ? 0.0f : dt;
+        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen) ? 0.0f : dt;
 
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         // Movement uses a purely horizontal forward vector (independent of pitch)
@@ -2363,7 +2497,7 @@ int main()
                 }
             }
         }
-        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen)
+        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen || gButtonEditOpen)
         {
             sprinting = false;
         }
@@ -2565,6 +2699,8 @@ int main()
             drawTooltip(hoverLabel.x, hoverLabel.y, winW, winH, hoverLabel.text);
         if (gSignEditOpen)
             drawSignEditBox(winW, winH, gSignEditBuffer);
+        if (gButtonEditOpen)
+            drawButtonEditBox(winW, winH, gButtonEditBuffer);
         endHud();
 
         SDL_GL_SwapWindow(window);

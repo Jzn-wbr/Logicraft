@@ -24,6 +24,7 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::XorGate, {"XOR", true, {0.2f, 0.5f, 0.9f}}},
     {BlockType::DFlipFlop, {"FLIPFLOP D", true, {0.2f, 0.78f, 0.72f}}},
     {BlockType::AddGate, {"ADD", true, {0.9f, 0.42f, 0.3f}}},
+    {BlockType::Counter, {"Counter", true, {0.8f, 0.8f, 0.25f}}},
     {BlockType::Led, {"LED", true, {0.95f, 0.9f, 0.2f}}},
     {BlockType::Button, {"Button", true, {0.6f, 0.2f, 0.2f}}},
     {BlockType::Wire, {"Wire", true, {0.55f, 0.55f, 0.58f}}},
@@ -36,8 +37,9 @@ const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockT
 const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
                                                   BlockType::Stone, BlockType::Glass, BlockType::AndGate,
                                                   BlockType::OrGate, BlockType::NotGate, BlockType::XorGate,
-                                                  BlockType::DFlipFlop, BlockType::AddGate, BlockType::Led,
-                                                  BlockType::Button,   BlockType::Wire,   BlockType::Sign};
+                                                  BlockType::DFlipFlop, BlockType::AddGate, BlockType::Counter,
+                                                  BlockType::Led,      BlockType::Button,   BlockType::Wire,
+                                                  BlockType::Sign};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -61,7 +63,7 @@ bool isTransparent(BlockType b)
 
 World::World(int w, int h, int d)
     : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), power(w * h * d, 0),
-      buttonState(w * h * d, 0), signText(w * h * d)
+      buttonState(w * h * d, 0), buttonValue(w * h * d, 0), signText(w * h * d)
 {
 }
 
@@ -73,7 +75,14 @@ void World::set(int x, int y, int z, BlockType b)
     tiles[idx] = b;
     power[idx] = 0;
     if (b != BlockType::Button)
+    {
         buttonState[idx] = 0;
+        buttonValue[idx] = 0;
+    }
+    else
+    {
+        buttonValue[idx] = 255; // default button payload is 255
+    }
     if (b != BlockType::Sign)
         signText[idx].clear();
 }
@@ -85,6 +94,10 @@ void World::setPower(int x, int y, int z, uint8_t v) { power[index(x, y, z)] = v
 uint8_t World::getButtonState(int x, int y, int z) const { return buttonState[index(x, y, z)]; }
 
 void World::setButtonState(int x, int y, int z, uint8_t v) { buttonState[index(x, y, z)] = v; }
+
+uint8_t World::getButtonValue(int x, int y, int z) const { return buttonValue[index(x, y, z)]; }
+
+void World::setButtonValue(int x, int y, int z, uint8_t v) { buttonValue[index(x, y, z)] = v; }
 
 void World::toggleButton(int x, int y, int z)
 {
@@ -305,17 +318,25 @@ void updateLogic(World &world)
 {
     int total = world.totalSize();
     std::vector<uint8_t> next(total, 0);
-    std::vector<uint8_t> sources(total, 0);
+    std::vector<uint8_t> sourcesVal(total, 0);
     std::vector<std::array<int, 3>> gateOutputs;
     std::vector<std::array<int, 3>> notOutputs;
     std::vector<std::array<int, 3>> addSumOutputs;
     std::vector<std::array<int, 3>> addCoutOutputs;
+    std::vector<uint8_t> gateOutVal;
+    std::vector<uint8_t> notOutVal;
+    std::vector<uint8_t> addSumVal;
+    std::vector<uint8_t> addCoutVal;
     std::vector<int> dffIndices;
     std::vector<uint8_t> dffNextClk(total, 0);
     gateOutputs.reserve(total / 16);
     notOutputs.reserve(total / 16);
     addSumOutputs.reserve(total / 16);
     addCoutOutputs.reserve(total / 16);
+    gateOutVal.reserve(total / 16);
+    notOutVal.reserve(total / 16);
+    addSumVal.reserve(total / 16);
+    addCoutVal.reserve(total / 16);
 
     auto idx = [&](int x, int y, int z)
     { return world.index(x, y, z); };
@@ -338,34 +359,43 @@ void updateLogic(World &world)
                 {
                 case BlockType::AndGate:
                 {
-                    int inA = powerAt(x - 1, y, z) ? 1 : 0;
-                    int inB = powerAt(x + 1, y, z) ? 1 : 0;
-                    out = (inA && inB) ? 1 : 0;
+                    uint8_t inA = powerAt(x - 1, y, z);
+                    uint8_t inB = powerAt(x + 1, y, z);
+                    out = inA & inB;
                     if (out)
+                    {
                         gateOutputs.push_back({x, y, z});
+                        gateOutVal.push_back(out);
+                    }
                     break;
                 }
                 case BlockType::OrGate:
                 {
-                    int inA = powerAt(x - 1, y, z) ? 1 : 0;
-                    int inB = powerAt(x + 1, y, z) ? 1 : 0;
-                    out = (inA || inB) ? 1 : 0;
+                    uint8_t inA = powerAt(x - 1, y, z);
+                    uint8_t inB = powerAt(x + 1, y, z);
+                    out = inA | inB;
                     if (out)
+                    {
                         gateOutputs.push_back({x, y, z});
+                        gateOutVal.push_back(out);
+                    }
                     break;
                 }
                 case BlockType::XorGate:
                 {
-                    int inA = powerAt(x - 1, y, z) ? 1 : 0;
-                    int inB = powerAt(x + 1, y, z) ? 1 : 0;
-                    out = (inA ^ inB) ? 1 : 0;
+                    uint8_t inA = powerAt(x - 1, y, z);
+                    uint8_t inB = powerAt(x + 1, y, z);
+                    out = inA ^ inB;
                     if (out)
+                    {
                         gateOutputs.push_back({x, y, z});
+                        gateOutVal.push_back(out);
+                    }
                     break;
                 }
                 case BlockType::DFlipFlop:
                 {
-                    uint8_t storedQ = world.getPower(x, y, z) ? 1 : 0;
+                    uint8_t storedQ = world.getPower(x, y, z);
                     uint8_t dIn = powerAt(x + 1, y, z) ? 1 : 0; // D on +X
                     uint8_t clk = powerAt(x - 1, y, z) ? 1 : 0; // CLK on -X
                     uint8_t prevClk = world.getButtonState(x, y, z) ? 1 : 0;
@@ -374,7 +404,10 @@ void updateLogic(World &world)
                         nextQ = dIn; // latch on rising edge
 
                     if (nextQ)
+                    {
                         gateOutputs.push_back({x, y, z});
+                        gateOutVal.push_back(nextQ);
+                    }
 
                     next[idx(x, y, z)] = nextQ;
                     int flat = idx(x, y, z);
@@ -385,37 +418,59 @@ void updateLogic(World &world)
                 }
                 case BlockType::AddGate:
                 {
-                    int p = powerAt(x - 1, y, z) ? 1 : 0;   // P on -X
-                    int q = powerAt(x + 1, y, z) ? 1 : 0;   // Q on +X
-                    int cin = powerAt(x, y, z - 1) ? 1 : 0; // Cin on -Z
-                    int sum = (p ^ q) ^ cin;
-                    int cout = (p && q) || (p && cin) || (q && cin);
+                    uint8_t p = powerAt(x - 1, y, z);   // P on -X
+                    uint8_t q = powerAt(x + 1, y, z);   // Q on +X
+                    uint8_t cin = powerAt(x, y, z - 1); // Cin on -Z (non-zero treated as 1)
+                    uint16_t res = static_cast<uint16_t>(p) + static_cast<uint16_t>(q) +
+                                   (cin ? 1u : 0u);
+                    uint8_t sum = static_cast<uint8_t>(res & 0xFFu);
+                    uint8_t cout = (res >> 8) ? 0xFF : 0x00;
                     if (sum)
+                    {
                         addSumOutputs.push_back({x, y, z});
+                        addSumVal.push_back(sum);
+                    }
                     if (cout)
+                    {
                         addCoutOutputs.push_back({x, y, z});
+                        addCoutVal.push_back(cout);
+                    }
                     out = 0;
                     break;
                 }
                 case BlockType::NotGate:
                 {
-                    int inA = powerAt(x + 1, y, z) ? 1 : 0; // input on +X (right)
-                    out = inA ? 0 : 1;
+                    uint8_t inA = powerAt(x + 1, y, z); // input on +X (right)
+                    out = static_cast<uint8_t>(~inA);
                     if (out)
+                    {
                         notOutputs.push_back({x, y, z});
+                        notOutVal.push_back(out);
+                    }
                     break;
                 }
                 case BlockType::Button:
-                    out = world.getButtonState(x, y, z) ? 1 : 0;
+                {
+                    uint8_t active = world.getButtonState(x, y, z) ? 1 : 0;
+                    out = active ? world.getButtonValue(x, y, z) : 0;
                     break;
+                }
+                case BlockType::Counter:
+                {
+                    // Single input on +X
+                    uint8_t val = powerAt(x + 1, y, z);
+                    next[idx(x, y, z)] = val;
+                    out = 0;
+                    break;
+                }
                 default:
                     out = 0;
                     break;
                 }
                 if (out && b == BlockType::Button)
                 {
-                    sources[idx(x, y, z)] = 1;
-                    next[idx(x, y, z)] = 1;
+                    sourcesVal[idx(x, y, z)] = out;
+                    next[idx(x, y, z)] = out;
                 }
             }
         }
@@ -424,32 +479,41 @@ void updateLogic(World &world)
     std::vector<int> queue;
     queue.reserve(total / 4);
     for (int i = 0; i < total; ++i)
-        if (sources[i])
+        if (sourcesVal[i])
             queue.push_back(i);
 
-    auto setPower = [&](int x, int y, int z)
+    auto setPower = [&](int x, int y, int z, uint8_t val)
     {
         if (!world.inside(x, y, z))
             return;
         int i = idx(x, y, z);
         if (next[i] == 0)
-            next[i] = 1;
+            next[i] = val;
+        else
+            next[i] |= val;
     };
 
-    auto pushWire = [&](int x, int y, int z)
+    auto pushWire = [&](int x, int y, int z, uint8_t val)
     {
         if (!world.inside(x, y, z))
             return;
         int i = idx(x, y, z);
         if (next[i] == 0)
         {
-            next[i] = 1;
+            next[i] = val;
+            queue.push_back(i);
+        }
+        else if ((next[i] | val) != next[i])
+        {
+            next[i] |= val;
             queue.push_back(i);
         }
     };
 
-    for (const auto &g : gateOutputs)
+    for (size_t idxOut = 0; idxOut < gateOutputs.size(); ++idxOut)
     {
+        const auto &g = gateOutputs[idxOut];
+        uint8_t val = gateOutVal[idxOut];
         int ox = g[0];
         int oy = g[1];
         int oz = g[2] + 1;
@@ -460,17 +524,21 @@ void updateLogic(World &world)
         if (outB == BlockType::Wire)
         {
             if (next[outIdx] == 0)
-                next[outIdx] = 1;
+                next[outIdx] = val;
+            else
+                next[outIdx] |= val;
             queue.push_back(outIdx);
         }
         else
         {
-            setPower(ox, oy, oz);
+            setPower(ox, oy, oz, val);
         }
     }
 
-    for (const auto &g : addSumOutputs)
+    for (size_t idxOut = 0; idxOut < addSumOutputs.size(); ++idxOut)
     {
+        const auto &g = addSumOutputs[idxOut];
+        uint8_t val = addSumVal[idxOut];
         int ox = g[0];
         int oy = g[1];
         int oz = g[2] + 1; // S toward +Z
@@ -481,17 +549,21 @@ void updateLogic(World &world)
         if (outB == BlockType::Wire)
         {
             if (next[outIdx] == 0)
-                next[outIdx] = 1;
+                next[outIdx] = val;
+            else
+                next[outIdx] |= val;
             queue.push_back(outIdx);
         }
         else
         {
-            setPower(ox, oy, oz);
+            setPower(ox, oy, oz, val);
         }
     }
 
-    for (const auto &g : addCoutOutputs)
+    for (size_t idxOut = 0; idxOut < addCoutOutputs.size(); ++idxOut)
     {
+        const auto &g = addCoutOutputs[idxOut];
+        uint8_t val = addCoutVal[idxOut];
         int ox = g[0];
         int oy = g[1] - 1; // Cout downward
         int oz = g[2];
@@ -502,18 +574,22 @@ void updateLogic(World &world)
         if (outB == BlockType::Wire)
         {
             if (next[outIdx] == 0)
-                next[outIdx] = 1;
+                next[outIdx] = val;
+            else
+                next[outIdx] |= val;
             queue.push_back(outIdx);
         }
         else
         {
-            setPower(ox, oy, oz);
+            setPower(ox, oy, oz, val);
         }
     }
 
     // NOT outputs go toward -X only (input on +X)
-    for (const auto &g : notOutputs)
+    for (size_t idxOut = 0; idxOut < notOutputs.size(); ++idxOut)
     {
+        const auto &g = notOutputs[idxOut];
+        uint8_t val = notOutVal[idxOut];
         int ox = g[0] - 1;
         int oy = g[1];
         int oz = g[2];
@@ -524,12 +600,14 @@ void updateLogic(World &world)
         if (outB == BlockType::Wire)
         {
             if (next[outIdx] == 0)
-                next[outIdx] = 1;
+                next[outIdx] = val;
+            else
+                next[outIdx] |= val;
             queue.push_back(outIdx);
         }
         else
         {
-            setPower(ox, oy, oz);
+            setPower(ox, oy, oz, val);
         }
     }
 
@@ -540,6 +618,7 @@ void updateLogic(World &world)
         int x = i % world.getWidth();
         int y = (i / world.getWidth()) / world.getDepth();
         int z = (i / world.getWidth()) % world.getDepth();
+        uint8_t valHere = next[i];
 
         int nx[6] = {x + 1, x - 1, x, x, x, x};
         int ny[6] = {y, y, y + 1, y - 1, y, y};
@@ -551,7 +630,7 @@ void updateLogic(World &world)
                 continue;
             BlockType nb = world.get(xx, yy, zz);
             if (nb == BlockType::Wire)
-                pushWire(xx, yy, zz);
+                pushWire(xx, yy, zz, valHere);
         }
     }
 
