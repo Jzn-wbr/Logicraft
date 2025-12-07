@@ -15,12 +15,13 @@ int CHUNK_Z_COUNT = 0;
 std::vector<ChunkMesh> chunkMeshes;
 GLuint gAtlasTex = 0;
 const int ATLAS_COLS = 4;
-const int ATLAS_ROWS = 5;
+const int ATLAS_ROWS = 6;
 const int ATLAS_TILE_SIZE = 32;
 std::map<BlockType, int> gBlockTile;
 int gAndTopTile = 0;
 int gOrTopTile = 0;
 int gNotTopTile = 0;
+int gXorTopTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 5;
 const int INV_ROWS = 3;
@@ -368,14 +369,180 @@ GLuint loadTextureFromBMP(const std::string &path)
     return tex;
 }
 
+GLuint loadCubemapFromBMP(const std::array<std::string, 6> &paths)
+{
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, tex);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    int baseW = -1;
+    int baseH = -1;
+    bool success = true;
+    for (int i = 0; i < 6; ++i)
+    {
+        SDL_Surface *surf = SDL_LoadBMP(paths[i].c_str());
+        if (!surf)
+        {
+            std::cerr << "Failed to load cubemap face \"" << paths[i] << "\": " << SDL_GetError() << "\n";
+            success = false;
+            continue;
+        }
+        SDL_Surface *rgba = SDL_ConvertSurfaceFormat(surf, SDL_PIXELFORMAT_ABGR8888, 0);
+        SDL_FreeSurface(surf);
+        if (!rgba)
+        {
+            std::cerr << "Failed to convert cubemap face \"" << paths[i] << "\" to RGBA: " << SDL_GetError() << "\n";
+            success = false;
+            continue;
+        }
+        if (baseW < 0)
+        {
+            baseW = rgba->w;
+            baseH = rgba->h;
+        }
+        else if (rgba->w != baseW || rgba->h != baseH)
+        {
+            std::cerr << "Cubemap face \"" << paths[i] << "\" has different size (" << rgba->w << "x" << rgba->h
+                      << "), expected " << baseW << "x" << baseH << ".\n";
+        }
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA, rgba->w, rgba->h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     rgba->pixels);
+        SDL_FreeSurface(rgba);
+    }
+
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    if (!success)
+    {
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
+    return tex;
+}
+
+void drawSkybox(GLuint cubemap, float size)
+{
+    if (cubemap == 0)
+        return;
+
+    float half = size * 0.5f;
+
+    GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean cullEnabled = glIsEnabled(GL_CULL_FACE);
+    GLboolean tex2DEnabled = glIsEnabled(GL_TEXTURE_2D);
+    GLint prevEnvMode = GL_MODULATE;
+    glGetTexEnviv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, &prevEnvMode);
+
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    if (tex2DEnabled)
+        glDisable(GL_TEXTURE_2D);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glEnable(GL_TEXTURE_CUBE_MAP);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap);
+
+    GLfloat viewMat[16];
+    glGetFloatv(GL_MODELVIEW_MATRIX, viewMat);
+    // remove translation so the skybox stays centered on camera
+    viewMat[12] = viewMat[13] = viewMat[14] = 0.0f;
+
+    glPushMatrix();
+    glLoadMatrixf(viewMat);
+
+    glBegin(GL_QUADS);
+    // +X (Right) rotated 90° CW (roll)
+    glTexCoord3f(half, half, -half);
+    glVertex3f(half, -half, -half);
+    glTexCoord3f(half, -half, -half);
+    glVertex3f(half, -half, half);
+    glTexCoord3f(half, -half, half);
+    glVertex3f(half, half, half);
+    glTexCoord3f(half, half, half);
+    glVertex3f(half, half, -half);
+
+    // -X (Left) rotated -90°
+    glTexCoord3f(-half, half, -half);
+    glVertex3f(-half, -half, half);
+    glTexCoord3f(-half, half, half);
+    glVertex3f(-half, -half, -half);
+    glTexCoord3f(-half, -half, half);
+    glVertex3f(-half, half, -half);
+    glTexCoord3f(-half, -half, -half);
+    glVertex3f(-half, half, half);
+
+    // +Y (Top)
+    glTexCoord3f(-half, half, -half);
+    glVertex3f(-half, half, -half);
+    glTexCoord3f(half, half, -half);
+    glVertex3f(half, half, -half);
+    glTexCoord3f(half, half, half);
+    glVertex3f(half, half, half);
+    glTexCoord3f(-half, half, half);
+    glVertex3f(-half, half, half);
+
+    // -Y (Bottom) rotated 180°
+    glTexCoord3f(half, -half, -half);
+    glVertex3f(-half, -half, half);
+    glTexCoord3f(-half, -half, -half);
+    glVertex3f(half, -half, half);
+    glTexCoord3f(-half, -half, half);
+    glVertex3f(half, -half, -half);
+    glTexCoord3f(half, -half, half);
+    glVertex3f(-half, -half, -half);
+
+    // +Z (Front)
+    glTexCoord3f(-half, -half, half);
+    glVertex3f(-half, -half, half);
+    glTexCoord3f(-half, half, half);
+    glVertex3f(-half, half, half);
+    glTexCoord3f(half, half, half);
+    glVertex3f(half, half, half);
+    glTexCoord3f(half, -half, half);
+    glVertex3f(half, -half, half);
+
+    // -Z (Back) rotated 180°
+    glTexCoord3f(-half, half, -half);
+    glVertex3f(half, -half, -half);
+    glTexCoord3f(-half, -half, -half);
+    glVertex3f(half, half, -half);
+    glTexCoord3f(half, -half, -half);
+    glVertex3f(-half, half, -half);
+    glTexCoord3f(half, half, -half);
+    glVertex3f(-half, -half, -half);
+    glEnd();
+
+    glPopMatrix();
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    glDisable(GL_TEXTURE_CUBE_MAP);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, prevEnvMode);
+    if (tex2DEnabled)
+        glEnable(GL_TEXTURE_2D);
+    if (cullEnabled)
+        glEnable(GL_CULL_FACE);
+    if (depthEnabled)
+        glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+}
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::Led, 13}, {BlockType::Button, 14}, {BlockType::Wire, 15}, {BlockType::Sign, 16}};
+    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1},  {BlockType::Stone, 2},  {BlockType::Wood, 3},
+                  {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7},
+                  {BlockType::Air, 8},    {BlockType::Glass, 9}, {BlockType::AndGate, 10},
+                  {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::XorGate, 13},
+                  {BlockType::Led, 14},   {BlockType::Button, 15}, {BlockType::Wire, 16},
+                  {BlockType::Sign, 17}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
     gAndTopTile = nextTile++;
     gOrTopTile = nextTile++;
     gNotTopTile = nextTile++;
+    gXorTopTile = nextTile++;
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
     int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
@@ -383,7 +550,7 @@ void createAtlasTexture()
     int maxTileIdx = 0;
     for (const auto &kv : gBlockTile)
         maxTileIdx = std::max(maxTileIdx, kv.second);
-    maxTileIdx = std::max(maxTileIdx, std::max(gAndTopTile, gOrTopTile));
+    maxTileIdx = std::max(maxTileIdx, std::max(std::max(gAndTopTile, gOrTopTile), gXorTopTile));
     if (maxTileIdx >= atlasCapacity)
     {
         std::cerr << "Atlas capacity too small for gate labels.\n";
@@ -406,6 +573,7 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Glass], {0.85f, 0.9f, 0.95f}, 88);
     fillTile(pixels, texW, gBlockTile[BlockType::AndGate], base(BlockType::AndGate), 15);
     fillTile(pixels, texW, gBlockTile[BlockType::OrGate], base(BlockType::OrGate), 16);
+    fillTile(pixels, texW, gBlockTile[BlockType::XorGate], base(BlockType::XorGate), 21);
     fillTile(pixels, texW, gBlockTile[BlockType::Led], base(BlockType::Led), 17);
     fillTile(pixels, texW, gBlockTile[BlockType::Button], base(BlockType::Button), 18);
     fillTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire), 19);
@@ -413,6 +581,7 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Sign], base(BlockType::Sign), 1);
     fillGateTileWithLabels(pixels, texW, gAndTopTile, base(BlockType::AndGate), 15, "AND");
     fillGateTileWithLabels(pixels, texW, gOrTopTile, base(BlockType::OrGate), 16, "OR");
+    fillGateTileWithLabels(pixels, texW, gXorTopTile, base(BlockType::XorGate), 17, "XOR");
     fillNotGateTile(pixels, texW, gNotTopTile, base(BlockType::NotGate), 15);
 
     if (gAtlasTex == 0)
@@ -606,6 +775,8 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             return gOrTopTile;
                         if (b == BlockType::NotGate)
                             return gNotTopTile;
+                        if (b == BlockType::XorGate)
+                            return gXorTopTile;
                     }
                     return tIdx;
                 };
@@ -628,7 +799,7 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                                 return true; // output side
                             return false;
                         }
-                        if (nb == BlockType::AndGate || nb == BlockType::OrGate)
+                        if (nb == BlockType::AndGate || nb == BlockType::OrGate || nb == BlockType::XorGate)
                         {
                             // Inputs on left/right, output on +Z (wire sees gate at dz = -1)
                             if (dx == 1 || dx == -1)

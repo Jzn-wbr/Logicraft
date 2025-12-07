@@ -21,6 +21,7 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::AndGate, {"AND", true, {0.18f, 0.7f, 0.32f}}},
     {BlockType::OrGate, {"OR", true, {0.92f, 0.56f, 0.18f}}},
     {BlockType::NotGate, {"NOT", true, {0.45f, 0.25f, 0.7f}}},
+    {BlockType::XorGate, {"XOR", true, {0.2f, 0.5f, 0.9f}}},
     {BlockType::Led, {"LED", true, {0.95f, 0.9f, 0.2f}}},
     {BlockType::Button, {"Button", true, {0.6f, 0.2f, 0.2f}}},
     {BlockType::Wire, {"Wire", true, {0.55f, 0.55f, 0.58f}}},
@@ -29,11 +30,12 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
 
 const std::vector<BlockType> HOTBAR = {BlockType::Dirt,   BlockType::Grass, BlockType::Wood,
                                        BlockType::Stone,  BlockType::Glass, BlockType::NotGate,
-                                       BlockType::Sign,   BlockType::Wire};
+                                       BlockType::Sign,   BlockType::XorGate};
 const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt,     BlockType::Grass, BlockType::Wood,
                                                   BlockType::Stone,    BlockType::Glass, BlockType::AndGate,
-                                                  BlockType::OrGate,   BlockType::NotGate, BlockType::Led,
-                                                  BlockType::Button,   BlockType::Wire,    BlockType::Sign};
+                                                  BlockType::OrGate,   BlockType::NotGate, BlockType::XorGate,
+                                                  BlockType::Led,      BlockType::Button,   BlockType::Wire,
+                                                  BlockType::Sign};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -340,6 +342,15 @@ void updateLogic(World &world)
                     int inA = powerAt(x - 1, y, z) ? 1 : 0;
                     int inB = powerAt(x + 1, y, z) ? 1 : 0;
                     out = (inA || inB) ? 1 : 0;
+                    if (out)
+                        gateOutputs.push_back({x, y, z});
+                    break;
+                }
+                case BlockType::XorGate:
+                {
+                    int inA = powerAt(x - 1, y, z) ? 1 : 0;
+                    int inB = powerAt(x + 1, y, z) ? 1 : 0;
+                    out = (inA ^ inB) ? 1 : 0;
                     if (out)
                         gateOutputs.push_back({x, y, z});
                     break;

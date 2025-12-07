@@ -928,7 +928,7 @@ static const char *MAPS_DIR = "maps";
 struct SaveHeader
 {
     char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
-    uint32_t version = 2;
+    uint32_t version = 3;
     uint32_t w = 0, h = 0, d = 0;
     uint32_t seed = 0;
 };
@@ -998,7 +998,7 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     in.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));
     if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
         return false;
-    if (hdr.version != 1 && hdr.version != 2)
+    if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3)
         return false;
     if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
         hdr.d != static_cast<uint32_t>(world.getDepth()))
@@ -1013,6 +1013,25 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
         in.read(reinterpret_cast<char *>(&btn), 1);
         if (!in)
             return false;
+
+        // Backward compatibility: versions 1–2 were saved before XorGate was inserted
+        // into the BlockType enum, so Led/Button/Wire/Sign indices moved.
+        if (hdr.version < 3)
+        {
+            // Old mapping:
+            // 13 = Led, 14 = Button, 15 = Wire, 16 = Sign
+            // New mapping:
+            // 14 = Led, 15 = Button, 16 = Wire, 17 = Sign
+            if (b == 13)
+                b = static_cast<uint8_t>(BlockType::Led);
+            else if (b == 14)
+                b = static_cast<uint8_t>(BlockType::Button);
+            else if (b == 15)
+                b = static_cast<uint8_t>(BlockType::Wire);
+            else if (b == 16)
+                b = static_cast<uint8_t>(BlockType::Sign);
+        }
+
         int x = i % world.getWidth();
         int y = (i / world.getWidth()) / world.getDepth();
         int z = (i / world.getWidth()) % world.getDepth();
@@ -1263,12 +1282,17 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         break;
     case BlockType::OrGate:
     case BlockType::AndGate:
+    case BlockType::XorGate:
     {
         glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
         glLineWidth(2.0f);
         float pad = slotSize * 0.18f;
         drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
-        const char *label = (slot.type == BlockType::AndGate) ? "AND" : "OR";
+        const char *label = "XOR";
+        if (slot.type == BlockType::AndGate)
+            label = "AND";
+        else if (slot.type == BlockType::OrGate)
+            label = "OR";
         float txtSize = 1.6f;
         float textWidth = static_cast<float>(std::strlen(label)) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
         float textX = x + (slotSize - textWidth) * 0.5f;
@@ -1715,6 +1739,19 @@ int main()
     {
         std::cerr << "Could not load NPC texture (images/npc_head_alt.bmp). Using flat color.\n";
     }
+    std::array<std::string, 6> skyboxPaths = {"images/skybox_night_right.bmp",  "images/skybox_night_left.bmp",
+                                              "images/skybox_night_top.bmp",    "images/skybox_night_bottom.bmp",
+                                              "images/skybox_night_front.bmp",  "images/skybox_night_back.bmp"};
+    GLuint skyboxTex = loadCubemapFromBMP(skyboxPaths);
+    if (skyboxTex == 0)
+    {
+        std::cerr << "Could not load skybox cubemap. It will be skipped.\n";
+    }
+    GLuint npcTextureAI = loadTextureFromBMP("images/mon_npc.bmp");
+    if (npcTextureAI == 0)
+    {
+        std::cerr << "Could not load NPC texture (images/mon_npc.bmp). Using flat color.\n";
+    }
 
     World world(WIDTH, HEIGHT, DEPTH);
     CHUNK_X_COUNT = (WIDTH + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -1744,6 +1781,12 @@ int main()
     npc2.x = npcGridX - 3.5f;
     npc2.z = npcGridZ - 1.5f;
     npc2.y = world.surfaceY(static_cast<int>(npc2.x), static_cast<int>(npc2.z));
+
+    NPC npc3 = npc;
+    npc3.texture = npcTextureAI ? npcTextureAI : npcTexture;
+    npc3.x = npcGridX + 4.0f;
+    npc3.z = npcGridZ - 2.5f;
+    npc3.y = world.surfaceY(static_cast<int>(npc3.x), static_cast<int>(npc3.z));
 
     int selected = 0;
     std::vector<ItemStack> hotbarSlots(HOTBAR.size());
@@ -2340,6 +2383,7 @@ int main()
 
         updateNpc(npc, world, simDt);
         updateNpc(npc2, world, simDt);
+        updateNpc(npc3, world, simDt);
         updateLogic(world);
 
         glClearColor(0.55f, 0.75f, 0.95f, 1.0f);
@@ -2349,6 +2393,8 @@ int main()
         Vec3 fwdView = forwardVec(player.yaw, player.pitch);
         gluLookAt(player.x, player.y + EYE_HEIGHT, player.z, player.x + fwdView.x, player.y + EYE_HEIGHT + fwdView.y,
                   player.z + fwdView.z, 0.0f, 1.0f, 0.0f);
+
+        drawSkybox(skyboxTex, 160.0f);
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -2428,6 +2474,7 @@ int main()
         // NPC blocky models
         drawNpcBlocky(npc);
         drawNpcBlocky(npc2);
+        drawNpcBlocky(npc3);
 
         // bouton 0/1 affiché directement sur le bloc proche du joueur
         drawButtonStateLabels(world, player, 10.0f);

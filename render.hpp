@@ -4,6 +4,7 @@
 #include "world.hpp"
 
 #include <map>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@ extern std::map<BlockType, int> gBlockTile;
 extern int gAndTopTile;
 extern int gOrTopTile;
 extern int gNotTopTile;
+extern int gXorTopTile;
 extern const std::map<char, std::array<uint8_t, 5>> FONT5x4;
 extern const int MAX_STACK;
 extern const int INV_COLS;
@@ -33,5 +35,7 @@ void ensureVbo(GLuint &vbo);
 int tileIndexFor(BlockType b);
 void createAtlasTexture();
 GLuint loadTextureFromBMP(const std::string &path);
+GLuint loadCubemapFromBMP(const std::array<std::string, 6> &paths);
 void buildChunkMesh(const World &world, int cx, int cy, int cz);
 void drawNpcBlocky(const NPC &npc);
+void drawSkybox(GLuint cubemap, float size);

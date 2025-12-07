@@ -22,6 +22,7 @@ enum class BlockType
     AndGate,
     OrGate,
     NotGate,
+    XorGate,
     Led,
     Button,
     Wire,

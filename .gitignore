@@ -1,0 +1,4 @@
+main.o
+render.o
+world.o
+messercraft.exe
