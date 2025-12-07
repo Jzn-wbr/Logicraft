@@ -928,7 +928,7 @@ static const char *MAPS_DIR = "maps";
 struct SaveHeader
 {
     char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
-    uint32_t version = 3;
+    uint32_t version = 5;
     uint32_t w = 0, h = 0, d = 0;
     uint32_t seed = 0;
 };
@@ -998,7 +998,7 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     in.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));
     if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
         return false;
-    if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3)
+    if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3 && hdr.version != 4 && hdr.version != 5)
         return false;
     if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
         hdr.d != static_cast<uint32_t>(world.getDepth()))
@@ -1301,6 +1301,26 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         glLineWidth(1.0f);
         break;
     }
+    case BlockType::AddGate:
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glLineWidth(2.0f);
+        float padAdd = slotSize * 0.18f;
+        drawOutline(x + padAdd, y + padAdd, slotSize - padAdd * 2, slotSize - padAdd * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
+        float txtSize = 1.4f;
+        float labelWidth =
+            static_cast<float>(std::strlen("ADD")) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
+        float textX = x + (slotSize - labelWidth) * 0.5f;
+        float textY = y + slotSize * 0.42f;
+        drawTextTiny(textX, textY, txtSize, "ADD", 1.0f, 1.0f, 1.0f, 1.0f);
+        drawTextTiny(x + padAdd + 2.0f, y + slotSize - padAdd - 8.0f, 1.1f, "P", 1.0f, 1.0f, 1.0f, 0.9f);
+        drawTextTiny(x + slotSize - padAdd - 8.0f, y + slotSize - padAdd - 8.0f, 1.1f, "Q", 1.0f, 1.0f, 1.0f, 0.9f);
+        drawTextTiny(x + (slotSize * 0.5f) - 4.0f, y + padAdd - 2.0f, 1.1f, "S", 1.0f, 1.0f, 1.0f, 0.9f);
+        drawTextTiny(x + padAdd + 2.0f, y + slotSize * 0.28f, 1.0f, "Cin", 1.0f, 1.0f, 1.0f, 0.9f);
+        drawTextTiny(x + slotSize * 0.54f, y + slotSize * 0.28f, 1.0f, "Cout", 1.0f, 1.0f, 1.0f, 0.9f);
+        glLineWidth(1.0f);
+        break;
+    }
     case BlockType::Wire:
         glColor4f(1.0f, 0.9f, 0.3f, 0.95f);
         glBegin(GL_LINE_STRIP);
@@ -1321,6 +1341,24 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         float textX = x + (slotSize - textWidth) * 0.5f;
         float textY = y + slotSize * 0.4f;
         drawTextTiny(textX, textY, txtSize, "NOT", 1.0f, 1.0f, 1.0f, 1.0f);
+        glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::DFlipFlop:
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glLineWidth(2.0f);
+        float padDff = slotSize * 0.18f;
+        drawOutline(x + padDff, y + padDff, slotSize - padDff * 2, slotSize - padDff * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
+        float txtSize = 1.4f;
+        float labelWidth =
+            static_cast<float>(std::strlen("DFF")) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
+        float textX = x + (slotSize - labelWidth) * 0.5f;
+        float textY = y + slotSize * 0.42f;
+        drawTextTiny(textX, textY, txtSize, "DFF", 1.0f, 1.0f, 1.0f, 1.0f);
+        drawTextTiny(x + padDff + 2.0f, y + slotSize - padDff - 8.0f, 1.2f, "D", 1.0f, 1.0f, 1.0f, 0.9f);
+        drawTextTiny(x + slotSize - padDff - 12.0f, y + slotSize - padDff - 8.0f, 1.2f, "CLK", 1.0f, 1.0f, 1.0f, 0.9f);
+        drawTextTiny(x + (slotSize * 0.5f) - 4.0f, y + padDff - 2.0f, 1.2f, "Q", 1.0f, 1.0f, 1.0f, 0.9f);
         glLineWidth(1.0f);
         break;
     }
@@ -1739,9 +1777,9 @@ int main()
     {
         std::cerr << "Could not load NPC texture (images/npc_head_alt.bmp). Using flat color.\n";
     }
-    std::array<std::string, 6> skyboxPaths = {"images/skybox_night_right.bmp",  "images/skybox_night_left.bmp",
-                                              "images/skybox_night_top.bmp",    "images/skybox_night_bottom.bmp",
-                                              "images/skybox_night_front.bmp",  "images/skybox_night_back.bmp"};
+    std::array<std::string, 6> skyboxPaths = {"images/skybox_night_right.bmp", "images/skybox_night_left.bmp",
+                                              "images/skybox_night_top.bmp", "images/skybox_night_bottom.bmp",
+                                              "images/skybox_night_front.bmp", "images/skybox_night_back.bmp"};
     GLuint skyboxTex = loadCubemapFromBMP(skyboxPaths);
     if (skyboxTex == 0)
     {
@@ -1826,7 +1864,7 @@ int main()
     SDL_ShowCursor(SDL_FALSE);
 
     std::cout << "Commandes: WASD/ZQSD deplacement, souris pour la camera, clic gauche miner, clic droit placer, "
-                 "1-5 changer de bloc, Space saut, Shift descendre, R regen, X save (non implemente), Esc menu pause.\n";
+                 "1-8 changer de bloc, Space saut, Shift descendre, Double jump fly, R teleport to spawn, Esc menu pause/save/load.\n";
 
     int winW = 1280, winH = 720;
     setup3D(winW, winH);

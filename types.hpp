@@ -26,7 +26,9 @@ enum class BlockType
     Led,
     Button,
     Wire,
-    Sign
+    Sign,
+    DFlipFlop,
+    AddGate
 };
 
 struct BlockInfo

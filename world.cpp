@@ -22,20 +22,22 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::OrGate, {"OR", true, {0.92f, 0.56f, 0.18f}}},
     {BlockType::NotGate, {"NOT", true, {0.45f, 0.25f, 0.7f}}},
     {BlockType::XorGate, {"XOR", true, {0.2f, 0.5f, 0.9f}}},
+    {BlockType::DFlipFlop, {"FLIPFLOP D", true, {0.2f, 0.78f, 0.72f}}},
+    {BlockType::AddGate, {"ADD", true, {0.9f, 0.42f, 0.3f}}},
     {BlockType::Led, {"LED", true, {0.95f, 0.9f, 0.2f}}},
     {BlockType::Button, {"Button", true, {0.6f, 0.2f, 0.2f}}},
     {BlockType::Wire, {"Wire", true, {0.55f, 0.55f, 0.58f}}},
     {BlockType::Sign, {"Sign", false, {0.85f, 0.7f, 0.45f}}},
 };
 
-const std::vector<BlockType> HOTBAR = {BlockType::Dirt,   BlockType::Grass, BlockType::Wood,
-                                       BlockType::Stone,  BlockType::Glass, BlockType::NotGate,
-                                       BlockType::Sign,   BlockType::XorGate};
-const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt,     BlockType::Grass, BlockType::Wood,
-                                                  BlockType::Stone,    BlockType::Glass, BlockType::AndGate,
-                                                  BlockType::OrGate,   BlockType::NotGate, BlockType::XorGate,
-                                                  BlockType::Led,      BlockType::Button,   BlockType::Wire,
-                                                  BlockType::Sign};
+const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
+                                       BlockType::Stone, BlockType::Glass, BlockType::NotGate,
+                                       BlockType::Sign, BlockType::XorGate};
+const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
+                                                  BlockType::Stone, BlockType::Glass, BlockType::AndGate,
+                                                  BlockType::OrGate, BlockType::NotGate, BlockType::XorGate,
+                                                  BlockType::DFlipFlop, BlockType::AddGate, BlockType::Led,
+                                                  BlockType::Button,   BlockType::Wire,   BlockType::Sign};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -306,8 +308,14 @@ void updateLogic(World &world)
     std::vector<uint8_t> sources(total, 0);
     std::vector<std::array<int, 3>> gateOutputs;
     std::vector<std::array<int, 3>> notOutputs;
+    std::vector<std::array<int, 3>> addSumOutputs;
+    std::vector<std::array<int, 3>> addCoutOutputs;
+    std::vector<int> dffIndices;
+    std::vector<uint8_t> dffNextClk(total, 0);
     gateOutputs.reserve(total / 16);
     notOutputs.reserve(total / 16);
+    addSumOutputs.reserve(total / 16);
+    addCoutOutputs.reserve(total / 16);
 
     auto idx = [&](int x, int y, int z)
     { return world.index(x, y, z); };
@@ -353,6 +361,40 @@ void updateLogic(World &world)
                     out = (inA ^ inB) ? 1 : 0;
                     if (out)
                         gateOutputs.push_back({x, y, z});
+                    break;
+                }
+                case BlockType::DFlipFlop:
+                {
+                    uint8_t storedQ = world.getPower(x, y, z) ? 1 : 0;
+                    uint8_t dIn = powerAt(x + 1, y, z) ? 1 : 0; // D on +X
+                    uint8_t clk = powerAt(x - 1, y, z) ? 1 : 0; // CLK on -X
+                    uint8_t prevClk = world.getButtonState(x, y, z) ? 1 : 0;
+                    uint8_t nextQ = storedQ;
+                    if (clk && !prevClk)
+                        nextQ = dIn; // latch on rising edge
+
+                    if (nextQ)
+                        gateOutputs.push_back({x, y, z});
+
+                    next[idx(x, y, z)] = nextQ;
+                    int flat = idx(x, y, z);
+                    dffNextClk[flat] = clk ? 1 : 0;
+                    dffIndices.push_back(flat);
+                    out = nextQ;
+                    break;
+                }
+                case BlockType::AddGate:
+                {
+                    int p = powerAt(x - 1, y, z) ? 1 : 0;   // P on -X
+                    int q = powerAt(x + 1, y, z) ? 1 : 0;   // Q on +X
+                    int cin = powerAt(x, y, z - 1) ? 1 : 0; // Cin on -Z
+                    int sum = (p ^ q) ^ cin;
+                    int cout = (p && q) || (p && cin) || (q && cin);
+                    if (sum)
+                        addSumOutputs.push_back({x, y, z});
+                    if (cout)
+                        addCoutOutputs.push_back({x, y, z});
+                    out = 0;
                     break;
                 }
                 case BlockType::NotGate:
@@ -427,6 +469,48 @@ void updateLogic(World &world)
         }
     }
 
+    for (const auto &g : addSumOutputs)
+    {
+        int ox = g[0];
+        int oy = g[1];
+        int oz = g[2] + 1; // S toward +Z
+        if (!world.inside(ox, oy, oz))
+            continue;
+        int outIdx = idx(ox, oy, oz);
+        BlockType outB = world.get(ox, oy, oz);
+        if (outB == BlockType::Wire)
+        {
+            if (next[outIdx] == 0)
+                next[outIdx] = 1;
+            queue.push_back(outIdx);
+        }
+        else
+        {
+            setPower(ox, oy, oz);
+        }
+    }
+
+    for (const auto &g : addCoutOutputs)
+    {
+        int ox = g[0];
+        int oy = g[1] - 1; // Cout downward
+        int oz = g[2];
+        if (!world.inside(ox, oy, oz))
+            continue;
+        int outIdx = idx(ox, oy, oz);
+        BlockType outB = world.get(ox, oy, oz);
+        if (outB == BlockType::Wire)
+        {
+            if (next[outIdx] == 0)
+                next[outIdx] = 1;
+            queue.push_back(outIdx);
+        }
+        else
+        {
+            setPower(ox, oy, oz);
+        }
+    }
+
     // NOT outputs go toward -X only (input on +X)
     for (const auto &g : notOutputs)
     {
@@ -471,9 +555,11 @@ void updateLogic(World &world)
         }
     }
 
-    auto nextAt = [&](int x, int y, int z) -> uint8_t
+    auto nextAtNonLed = [&](int x, int y, int z) -> uint8_t
     {
         if (!world.inside(x, y, z))
+            return 0;
+        if (world.get(x, y, z) == BlockType::Led)
             return 0;
         return next[idx(x, y, z)];
     };
@@ -489,12 +575,20 @@ void updateLogic(World &world)
                 int nx[6] = {x + 1, x - 1, x, x, x, x};
                 int ny[6] = {y, y, y + 1, y - 1, y, y};
                 int nz[6] = {z, z, z, z, z + 1, z - 1};
-                uint8_t lit = nextAt(x, y, z);
+                uint8_t lit = nextAtNonLed(x, y, z);
                 for (int i = 0; i < 6 && !lit; ++i)
-                    lit = nextAt(nx[i], ny[i], nz[i]) ? 1 : 0;
+                    lit = nextAtNonLed(nx[i], ny[i], nz[i]) ? 1 : 0;
                 next[idx(x, y, z)] = lit;
             }
         }
+    }
+
+    for (int flat : dffIndices)
+    {
+        int x = flat % world.getWidth();
+        int y = (flat / world.getWidth()) / world.getDepth();
+        int z = (flat / world.getWidth()) % world.getDepth();
+        world.setButtonState(x, y, z, dffNextClk[flat]);
     }
 
     for (int y = 0; y < world.getHeight(); ++y)

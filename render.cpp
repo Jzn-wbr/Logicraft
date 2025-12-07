@@ -15,13 +15,16 @@ int CHUNK_Z_COUNT = 0;
 std::vector<ChunkMesh> chunkMeshes;
 GLuint gAtlasTex = 0;
 const int ATLAS_COLS = 4;
-const int ATLAS_ROWS = 6;
+const int ATLAS_ROWS = 7;
 const int ATLAS_TILE_SIZE = 32;
 std::map<BlockType, int> gBlockTile;
 int gAndTopTile = 0;
 int gOrTopTile = 0;
 int gNotTopTile = 0;
 int gXorTopTile = 0;
+int gDffTopTile = 0;
+int gAddTopTile = 0;
+int gAddBottomTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 5;
 const int INV_ROWS = 3;
@@ -340,6 +343,85 @@ void fillNotGateTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std
                        255);
 }
 
+void fillDffTopTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
+                    int styleSeed)
+{
+    fillTile(pix, texW, tileIdx, baseColor, styleSeed);
+    auto toByte = [](float v, float mul)
+    {
+        return static_cast<uint8_t>(std::clamp(v * mul, 0.0f, 1.0f) * 255.0f);
+    };
+    uint8_t textR = 245, textG = 245, textB = 240;
+    uint8_t accentR = toByte(baseColor[0], 1.25f);
+    uint8_t accentG = toByte(baseColor[1], 1.25f);
+    uint8_t accentB = toByte(baseColor[2], 1.25f);
+    uint8_t bgR = toByte(baseColor[0], 0.55f);
+    uint8_t bgG = toByte(baseColor[1], 0.55f);
+    uint8_t bgB = toByte(baseColor[2], 0.55f);
+
+    int tileX = (tileIdx % ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int tileY = (tileIdx / ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int centerX = ATLAS_TILE_SIZE / 2;
+    int centerY = ATLAS_TILE_SIZE / 2;
+
+    // D input rail (left) and CLK rail (right)
+    fillRect(pix, texW, tileX + 2, tileY + centerY - 2, centerX - 6, 4, accentR, accentG, accentB, 255);
+    fillRect(pix, texW, tileX + centerX + 4, tileY + centerY - 2, ATLAS_TILE_SIZE - centerX - 6, 4, accentR, accentG,
+             accentB, 255);
+    // Clock teeth on the right rail
+    for (int i = 0; i < 3; ++i)
+    {
+        int toothY = centerY - 6 + i * 4;
+        fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - 8, tileY + toothY, 3, 3, textR, textG, textB, 255);
+    }
+
+    // Vertical pillar to the Q output
+    fillRect(pix, texW, tileX + centerX - 1, tileY + 4, 3, centerY - 6, accentR, accentG, accentB, 255);
+    fillRect(pix, texW, tileX + centerX - 5, tileY + 6, 10, 3, accentR, accentG, accentB, 255);
+
+    int scale = 1;
+    int dWidth = tinyTextWidthOnTile("D", scale);
+    int clkWidth = tinyTextWidthOnTile("CLK", scale);
+    int qWidth = tinyTextWidthOnTile("Q", scale);
+    int gateWidth = tinyTextWidthOnTile("DFF", scale);
+
+    int labelBgH = 7;
+    int baseLabelY = ATLAS_TILE_SIZE - labelBgH - 2;
+    fillRect(pix, texW, tileX + 2, tileY + baseLabelY - 1, dWidth + 4, labelBgH, bgR, bgG, bgB, 255);
+    fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - clkWidth - 6, tileY + baseLabelY - 1, clkWidth + 4, labelBgH, bgR,
+             bgG, bgB, 255);
+    fillRect(pix, texW, tileX + (ATLAS_TILE_SIZE - qWidth) / 2 - 2, tileY + 2, qWidth + 4, labelBgH, bgR, bgG, bgB, 255);
+    fillRect(pix, texW, tileX + (ATLAS_TILE_SIZE - gateWidth) / 2 - 2, tileY + centerY - 7, gateWidth + 4, labelBgH,
+             bgR, bgG, bgB, 255);
+
+    blitTinyTextToTile(pix, texW, tileIdx, 4, baseLabelY, "D", scale, textR, textG, textB, 255);
+    blitTinyTextToTile(pix, texW, tileIdx, ATLAS_TILE_SIZE - clkWidth - 4, baseLabelY, "CLK", scale, textR, textG,
+                       textB, 255);
+    blitTinyTextToTile(pix, texW, tileIdx, (ATLAS_TILE_SIZE - qWidth) / 2, 3, "Q", scale, textR, textG, textB, 255);
+    blitTinyTextToTile(pix, texW, tileIdx, (ATLAS_TILE_SIZE - gateWidth) / 2, centerY - 6, "DFF", scale, textR, textG,
+                       textB, 255);
+}
+
+void fillAddTopTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
+                    int styleSeed)
+{
+    fillTile(pix, texW, tileIdx, baseColor, styleSeed);
+    drawGateTopLabels(pix, texW, tileIdx, baseColor, "ADD");
+}
+
+void fillAddBottomTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
+                       int styleSeed)
+{
+    fillTile(pix, texW, tileIdx, baseColor, styleSeed);
+    int scale = 1;
+    int coutWidth = tinyTextWidthOnTile("C OUT", scale);
+    int tileX = (tileIdx % ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int tileY = (tileIdx / ATLAS_COLS) * ATLAS_TILE_SIZE;
+    int x = tileX + (ATLAS_TILE_SIZE - coutWidth) / 2;
+    int y = tileY + (ATLAS_TILE_SIZE - 5 * scale) / 2;
+    blitTinyTextToTile(pix, texW, tileIdx, x - tileX, y - tileY, "C OUT", scale, 245, 245, 245, 255);
+}
+
 GLuint loadTextureFromBMP(const std::string &path)
 {
     SDL_Surface *surf = SDL_LoadBMP(path.c_str());
@@ -531,18 +613,16 @@ void drawSkybox(GLuint cubemap, float size)
 }
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1},  {BlockType::Stone, 2},  {BlockType::Wood, 3},
-                  {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7},
-                  {BlockType::Air, 8},    {BlockType::Glass, 9}, {BlockType::AndGate, 10},
-                  {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::XorGate, 13},
-                  {BlockType::Led, 14},   {BlockType::Button, 15}, {BlockType::Wire, 16},
-                  {BlockType::Sign, 17}};
+    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::XorGate, 13}, {BlockType::Led, 14}, {BlockType::Button, 15}, {BlockType::Wire, 16}, {BlockType::Sign, 17}, {BlockType::DFlipFlop, 18}, {BlockType::AddGate, 19}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
     gAndTopTile = nextTile++;
     gOrTopTile = nextTile++;
     gNotTopTile = nextTile++;
     gXorTopTile = nextTile++;
+    gDffTopTile = nextTile++;
+    gAddTopTile = nextTile++;
+    gAddBottomTile = nextTile++;
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
     int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
@@ -551,6 +631,7 @@ void createAtlasTexture()
     for (const auto &kv : gBlockTile)
         maxTileIdx = std::max(maxTileIdx, kv.second);
     maxTileIdx = std::max(maxTileIdx, std::max(std::max(gAndTopTile, gOrTopTile), gXorTopTile));
+    maxTileIdx = std::max(maxTileIdx, std::max(std::max(gDffTopTile, gAddTopTile), gAddBottomTile));
     if (maxTileIdx >= atlasCapacity)
     {
         std::cerr << "Atlas capacity too small for gate labels.\n";
@@ -574,6 +655,8 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::AndGate], base(BlockType::AndGate), 15);
     fillTile(pixels, texW, gBlockTile[BlockType::OrGate], base(BlockType::OrGate), 16);
     fillTile(pixels, texW, gBlockTile[BlockType::XorGate], base(BlockType::XorGate), 21);
+    fillTile(pixels, texW, gBlockTile[BlockType::DFlipFlop], base(BlockType::DFlipFlop), 23);
+    fillTile(pixels, texW, gBlockTile[BlockType::AddGate], base(BlockType::AddGate), 25);
     fillTile(pixels, texW, gBlockTile[BlockType::Led], base(BlockType::Led), 17);
     fillTile(pixels, texW, gBlockTile[BlockType::Button], base(BlockType::Button), 18);
     fillTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire), 19);
@@ -583,6 +666,9 @@ void createAtlasTexture()
     fillGateTileWithLabels(pixels, texW, gOrTopTile, base(BlockType::OrGate), 16, "OR");
     fillGateTileWithLabels(pixels, texW, gXorTopTile, base(BlockType::XorGate), 17, "XOR");
     fillNotGateTile(pixels, texW, gNotTopTile, base(BlockType::NotGate), 15);
+    fillDffTopTile(pixels, texW, gDffTopTile, base(BlockType::DFlipFlop), 23);
+    fillAddTopTile(pixels, texW, gAddTopTile, base(BlockType::AddGate), 25);
+    fillAddBottomTile(pixels, texW, gAddBottomTile, base(BlockType::AddGate), 25);
 
     if (gAtlasTex == 0)
     {
@@ -762,6 +848,22 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     color[1] = std::min(color[1] + 0.05f, 1.0f);
                     color[2] = std::min(color[2] + 0.05f, 1.0f);
                 }
+                else if (b == BlockType::DFlipFlop && world.getPower(x, y, z))
+                {
+                    color[0] = std::min(color[0] + 0.16f, 1.0f);
+                    color[1] = std::min(color[1] + 0.08f, 1.0f);
+                    color[2] = std::min(color[2] + 0.08f, 1.0f);
+                }
+                else if (b == BlockType::AddGate)
+                {
+                    // no persistent power, but give a mild accent when adjacent wire powers it
+                    if (world.getPower(x - 1, y, z) || world.getPower(x + 1, y, z) || world.getPower(x, y, z - 1))
+                    {
+                        color[0] = std::min(color[0] + 0.08f, 1.0f);
+                        color[1] = std::min(color[1] + 0.08f, 1.0f);
+                        color[2] = std::min(color[2] + 0.05f, 1.0f);
+                    }
+                }
                 int tIdx = tileIndexFor(b);
                 auto faceTile = [&](int nx, int ny, int nz)
                 {
@@ -777,7 +879,13 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             return gNotTopTile;
                         if (b == BlockType::XorGate)
                             return gXorTopTile;
+                        if (b == BlockType::DFlipFlop)
+                            return gDffTopTile;
+                        if (b == BlockType::AddGate)
+                            return gAddTopTile;
                     }
+                    if (ny == -1 && b == BlockType::AddGate)
+                        return gAddBottomTile;
                     return tIdx;
                 };
                 if (b == BlockType::Wire)
@@ -799,17 +907,24 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                                 return true; // output side
                             return false;
                         }
-                        if (nb == BlockType::AndGate || nb == BlockType::OrGate || nb == BlockType::XorGate)
+                        if (nb == BlockType::AndGate || nb == BlockType::OrGate || nb == BlockType::XorGate ||
+                            nb == BlockType::DFlipFlop || nb == BlockType::AddGate)
                         {
-                            // Inputs on left/right, output on +Z (wire sees gate at dz = -1)
+                            // Inputs on left/right, Cin on -Z, Sum on +Z, Cout on -Y (top face is non-connectable)
                             if (dx == 1 || dx == -1)
-                                return true;
+                                return true; // P/Q
                             if (dz == -1)
-                                return true;
+                                return true; // Cin
+                            if (dz == 1)
+                                return true; // Sum
+                            if (dy == 1)
+                                return true; // Cout (wire is below, gate above)
+                            if (dy == -1)
+                                return false; // top blocked
                             return false;
                         }
                         return nb == BlockType::Wire || nb == BlockType::Button || nb == BlockType::Led ||
-                               nb == BlockType::AndGate || nb == BlockType::OrGate;
+                               nb == BlockType::AndGate || nb == BlockType::OrGate || nb == BlockType::DFlipFlop;
                     };
 
                     float cx = static_cast<float>(x) + 0.5f;
