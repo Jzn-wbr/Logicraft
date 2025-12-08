@@ -231,7 +231,8 @@ void blitTinyTextToTile(std::vector<uint8_t> &pix, int texW, int tileIdx, int x,
 
 void drawGateTopLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
                        const std::string &gateLabel, const char *left = "IN", const char *right = "IN",
-                       const char *out = "OUT")
+                       const char *out = "OUT", bool outBottom = false, bool inputsTop = false,
+                       bool centerDown = false)
 {
     auto toByte = [](float v, float mul)
     {
@@ -253,7 +254,11 @@ void drawGateTopLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const s
     int centerX = ATLAS_TILE_SIZE / 2;
     int midY = ATLAS_TILE_SIZE / 2 + 2;
 
-    fillRect(pix, texW, tileX + centerX - 2, tileY, 4, midY - 1, accentR, accentG, accentB, 255);
+    if (centerDown)
+        fillRect(pix, texW, tileX + centerX - 2, tileY + midY - 1, 4, ATLAS_TILE_SIZE - (midY - 1), accentR, accentG,
+                 accentB, 255);
+    else
+        fillRect(pix, texW, tileX + centerX - 2, tileY, 4, midY - 1, accentR, accentG, accentB, 255);
     fillRect(pix, texW, tileX + 8, tileY + midY - 1, ATLAS_TILE_SIZE - 16, 2, accentR, accentG, accentB, 255);
     fillRect(pix, texW, tileX + 2, tileY + midY - 2, 5, 4, accentR, accentG, accentB, 255);
     fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - 7, tileY + midY - 2, 5, 4, accentR, accentG, accentB, 255);
@@ -272,8 +277,8 @@ void drawGateTopLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const s
     int outWidth = tinyTextWidthOnTile(out, labelScale);
     int gateWidth = tinyTextWidthOnTile(gateLabel, labelScale);
 
-    int inY = ATLAS_TILE_SIZE - labelHeight - 3;
-    int outY = 4;
+    int inY = inputsTop ? 4 : (ATLAS_TILE_SIZE - labelHeight - 3);
+    int outY = outBottom ? (inputsTop ? ATLAS_TILE_SIZE - labelHeight - 3 : inY) : 4;
     int gateY = midY - 2;
 
     fillRect(pix, texW, tileX + 1, tileY + inY - 1, leftWidth + 4, labelHeight + 2, bgR, bgG, bgB, 255);
@@ -295,10 +300,11 @@ void drawGateTopLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const s
 
 void fillGateTileWithLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
                             int styleSeed, const std::string &gateLabel, const char *left = "IN",
-                            const char *right = "IN", const char *out = "OUT")
+                            const char *right = "IN", const char *out = "OUT", bool outBottom = false,
+                            bool inputsTop = false, bool centerDown = false)
 {
     fillTile(pix, texW, tileIdx, baseColor, styleSeed);
-    drawGateTopLabels(pix, texW, tileIdx, baseColor, gateLabel, left, right, out);
+    drawGateTopLabels(pix, texW, tileIdx, baseColor, gateLabel, left, right, out, outBottom, inputsTop, centerDown);
 }
 
 void fillNotGateTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
@@ -729,8 +735,9 @@ void createAtlasTexture()
     fillAddBottomTile(pixels, texW, gAddBottomTile, base(BlockType::AddGate), 25);
     fillAddBackTile(pixels, texW, gAddBackTile, base(BlockType::AddGate), 25);
     fillCounterTopTile(pixels, texW, gCounterTopTile, base(BlockType::Counter), 12);
-    fillGateTileWithLabels(pixels, texW, gSplitterTopTile, base(BlockType::Splitter), 22, "SPLIT");
-    fillGateTileWithLabels(pixels, texW, gMergerTopTile, base(BlockType::Merger), 23, "MERGER", "B2", "B1", "BUS");
+    fillGateTileWithLabels(pixels, texW, gSplitterTopTile, base(BlockType::Splitter), 22, "SPLIT", "B2", "B1", "BUS",
+                           true, true, true);
+    fillGateTileWithLabels(pixels, texW, gMergerTopTile, base(BlockType::Merger), 23, "MERGE", "B2", "B1", "BUS");
 
     if (gAtlasTex == 0)
     {

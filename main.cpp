@@ -1142,7 +1142,7 @@ void drawSplitterEditBox(int winW, int winH, bool isMerger, const std::string &w
 
     drawTextTiny(textX, textY, 2.2f, isMerger ? "Merger" : "Splitter", 1.0f, 0.95f, 0.9f, 1.0f);
     drawTextTiny(textX, textY + 26.0f, 1.6f,
-                 isMerger ? "B1 et B2 reunis vers BUS (+Z)" : "BUS (+Z) vers B1 (-X) et B2 (+X)",
+                 isMerger ? "B1 et B2 reunis vers BUS" : "BUS vers B1 et B2",
                  0.9f, 0.9f, 0.9f, 1.0f);
 
     drawTextTiny(textX, textY + 52.0f, 2.0f, "Largeur B1 (1-7 bits)", 1.0f, 0.95f, 0.85f, 1.0f);
@@ -1155,7 +1155,7 @@ void drawSplitterEditBox(int winW, int winH, bool isMerger, const std::string &w
                           : (order ? "Ordre: B1 recoit les bits de poids fort" : "Ordre: B1 recoit les bits faibles"),
                  0.95f, 0.95f, 0.95f, 1.0f);
 
-    drawTextTiny(textX, textY + 140.0f, 1.5f, "Tab pour inverser l'ordre, Entrer pour valider, Esc pour annuler",
+    drawTextTiny(textX, textY + 140.0f, 1.5f, "Tab:inverse l'ordre, Entrer:valider, Esc:annuler",
                  0.85f, 0.85f, 0.85f, 1.0f);
 }
 
