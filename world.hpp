@@ -21,15 +21,19 @@ public:
     BlockType get(int x, int y, int z) const;
     void set(int x, int y, int z, BlockType b);
     uint8_t getPower(int x, int y, int z) const;
+    uint8_t getPowerWidth(int x, int y, int z) const;
     void setPower(int x, int y, int z, uint8_t v);
+    void setPowerWidth(int x, int y, int z, uint8_t w);
     uint8_t getButtonState(int x, int y, int z) const;
     void setButtonState(int x, int y, int z, uint8_t v);
     uint8_t getButtonValue(int x, int y, int z) const;
     void setButtonValue(int x, int y, int z, uint8_t v);
+    uint8_t getButtonWidth(int x, int y, int z) const;
+    void setButtonWidth(int x, int y, int z, uint8_t bits);
     void toggleButton(int x, int y, int z);
     int index(int x, int y, int z) const;
     int totalSize() const;
-    void overwritePower(const std::vector<uint8_t> &next);
+    void overwritePower(const std::vector<uint8_t> &next, const std::vector<uint8_t> &nextWidth);
     int getWidth() const;
     int getHeight() const;
     int getDepth() const;
@@ -46,8 +50,10 @@ private:
     int depth;
     std::vector<BlockType> tiles;
     std::vector<uint8_t> power;
+    std::vector<uint8_t> powerWidth;
     std::vector<uint8_t> buttonState;
     std::vector<uint8_t> buttonValue;
+    std::vector<uint8_t> buttonWidth;
     std::vector<std::string> signText;
 };
 

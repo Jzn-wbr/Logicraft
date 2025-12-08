@@ -63,7 +63,8 @@ bool isTransparent(BlockType b)
 
 World::World(int w, int h, int d)
     : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), power(w * h * d, 0),
-      buttonState(w * h * d, 0), buttonValue(w * h * d, 0), signText(w * h * d)
+      powerWidth(w * h * d, 8), buttonState(w * h * d, 0), buttonValue(w * h * d, 0),
+      buttonWidth(w * h * d, 0), signText(w * h * d)
 {
 }
 
@@ -74,14 +75,17 @@ void World::set(int x, int y, int z, BlockType b)
     int idx = index(x, y, z);
     tiles[idx] = b;
     power[idx] = 0;
+    powerWidth[idx] = 8;
     if (b != BlockType::Button)
     {
         buttonState[idx] = 0;
         buttonValue[idx] = 0;
+        buttonWidth[idx] = 0;
     }
     else
     {
-        buttonValue[idx] = 255; // default button payload is 255
+        buttonValue[idx] = 1; // default button payload is 1 (1-bit)
+        buttonWidth[idx] = 1; // default to 1-bit bus
     }
     if (b != BlockType::Sign)
         signText[idx].clear();
@@ -89,7 +93,11 @@ void World::set(int x, int y, int z, BlockType b)
 
 uint8_t World::getPower(int x, int y, int z) const { return power[index(x, y, z)]; }
 
+uint8_t World::getPowerWidth(int x, int y, int z) const { return powerWidth[index(x, y, z)]; }
+
 void World::setPower(int x, int y, int z, uint8_t v) { power[index(x, y, z)] = v; }
+
+void World::setPowerWidth(int x, int y, int z, uint8_t w) { powerWidth[index(x, y, z)] = w; }
 
 uint8_t World::getButtonState(int x, int y, int z) const { return buttonState[index(x, y, z)]; }
 
@@ -97,7 +105,26 @@ void World::setButtonState(int x, int y, int z, uint8_t v) { buttonState[index(x
 
 uint8_t World::getButtonValue(int x, int y, int z) const { return buttonValue[index(x, y, z)]; }
 
-void World::setButtonValue(int x, int y, int z, uint8_t v) { buttonValue[index(x, y, z)] = v; }
+void World::setButtonValue(int x, int y, int z, uint8_t v)
+{
+    int i = index(x, y, z);
+    uint8_t width = buttonWidth[i];
+    if (width == 0)
+        width = 8;
+    uint8_t mask = (width >= 8) ? 0xFFu : static_cast<uint8_t>((1u << width) - 1u);
+    buttonValue[i] = static_cast<uint8_t>(v & mask);
+}
+
+uint8_t World::getButtonWidth(int x, int y, int z) const { return buttonWidth[index(x, y, z)]; }
+
+void World::setButtonWidth(int x, int y, int z, uint8_t bits)
+{
+    int i = index(x, y, z);
+    uint8_t clamped = static_cast<uint8_t>(std::clamp<int>(bits, 1, 8));
+    buttonWidth[i] = clamped;
+    uint8_t mask = (clamped >= 8) ? 0xFFu : static_cast<uint8_t>((1u << clamped) - 1u);
+    buttonValue[i] &= mask; // trim stored payload to the new width
+}
 
 void World::toggleButton(int x, int y, int z)
 {
@@ -109,7 +136,11 @@ int World::index(int x, int y, int z) const { return (y * depth + z) * width + x
 
 int World::totalSize() const { return static_cast<int>(tiles.size()); }
 
-void World::overwritePower(const std::vector<uint8_t> &next) { power = next; }
+void World::overwritePower(const std::vector<uint8_t> &next, const std::vector<uint8_t> &nextW)
+{
+    power = next;
+    powerWidth = nextW;
+}
 
 int World::getWidth() const { return width; }
 int World::getHeight() const { return height; }
@@ -122,7 +153,9 @@ void World::generate(unsigned seed)
 
     int surface = height / 4;
     std::fill(power.begin(), power.end(), 0);
+    std::fill(powerWidth.begin(), powerWidth.end(), 8);
     std::fill(buttonState.begin(), buttonState.end(), 0);
+    std::fill(buttonWidth.begin(), buttonWidth.end(), 0);
     for (int z = 0; z < depth; ++z)
     {
         for (int x = 0; x < width; ++x)
@@ -318,15 +351,20 @@ void updateLogic(World &world)
 {
     int total = world.totalSize();
     std::vector<uint8_t> next(total, 0);
+    std::vector<uint8_t> nextWidth(total, 8);
     std::vector<uint8_t> sourcesVal(total, 0);
     std::vector<std::array<int, 3>> gateOutputs;
     std::vector<std::array<int, 3>> notOutputs;
     std::vector<std::array<int, 3>> addSumOutputs;
     std::vector<std::array<int, 3>> addCoutOutputs;
     std::vector<uint8_t> gateOutVal;
+    std::vector<uint8_t> gateOutWidth;
     std::vector<uint8_t> notOutVal;
     std::vector<uint8_t> addSumVal;
     std::vector<uint8_t> addCoutVal;
+    std::vector<uint8_t> notOutWidth;
+    std::vector<uint8_t> addSumWidth;
+    std::vector<uint8_t> addCoutWidth;
     std::vector<int> dffIndices;
     std::vector<uint8_t> dffNextClk(total, 0);
     gateOutputs.reserve(total / 16);
@@ -334,9 +372,13 @@ void updateLogic(World &world)
     addSumOutputs.reserve(total / 16);
     addCoutOutputs.reserve(total / 16);
     gateOutVal.reserve(total / 16);
+    gateOutWidth.reserve(total / 16);
     notOutVal.reserve(total / 16);
     addSumVal.reserve(total / 16);
     addCoutVal.reserve(total / 16);
+    notOutWidth.reserve(total / 16);
+    addSumWidth.reserve(total / 16);
+    addCoutWidth.reserve(total / 16);
 
     auto idx = [&](int x, int y, int z)
     { return world.index(x, y, z); };
@@ -346,6 +388,17 @@ void updateLogic(World &world)
             return 0;
         return world.getPower(x, y, z);
     };
+    auto widthAt = [&](int x, int y, int z) -> uint8_t
+    {
+        if (!world.inside(x, y, z))
+            return 8;
+        return world.getPowerWidth(x, y, z);
+    };
+
+    for (int y = 0; y < world.getHeight(); ++y)
+        for (int z = 0; z < world.getDepth(); ++z)
+            for (int x = 0; x < world.getWidth(); ++x)
+                nextWidth[idx(x, y, z)] = world.getPowerWidth(x, y, z);
 
     for (int y = 0; y < world.getHeight(); ++y)
     {
@@ -361,11 +414,16 @@ void updateLogic(World &world)
                 {
                     uint8_t inA = powerAt(x - 1, y, z);
                     uint8_t inB = powerAt(x + 1, y, z);
-                    out = inA & inB;
+                    uint8_t w = static_cast<uint8_t>(std::min(widthAt(x - 1, y, z), widthAt(x + 1, y, z)));
+                    if (w == 0)
+                        w = 8;
+                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) - 1u);
+                    out = static_cast<uint8_t>((inA & mask) & (inB & mask));
                     if (out)
                     {
                         gateOutputs.push_back({x, y, z});
                         gateOutVal.push_back(out);
+                        gateOutWidth.push_back(w);
                     }
                     break;
                 }
@@ -373,11 +431,16 @@ void updateLogic(World &world)
                 {
                     uint8_t inA = powerAt(x - 1, y, z);
                     uint8_t inB = powerAt(x + 1, y, z);
-                    out = inA | inB;
+                    uint8_t w = static_cast<uint8_t>(std::min(widthAt(x - 1, y, z), widthAt(x + 1, y, z)));
+                    if (w == 0)
+                        w = 8;
+                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) - 1u);
+                    out = static_cast<uint8_t>((inA & mask) | (inB & mask));
                     if (out)
                     {
                         gateOutputs.push_back({x, y, z});
                         gateOutVal.push_back(out);
+                        gateOutWidth.push_back(w);
                     }
                     break;
                 }
@@ -385,31 +448,51 @@ void updateLogic(World &world)
                 {
                     uint8_t inA = powerAt(x - 1, y, z);
                     uint8_t inB = powerAt(x + 1, y, z);
-                    out = inA ^ inB;
+                    uint8_t w = static_cast<uint8_t>(std::min(widthAt(x - 1, y, z), widthAt(x + 1, y, z)));
+                    if (w == 0)
+                        w = 8;
+                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) - 1u);
+                    out = static_cast<uint8_t>((inA & mask) ^ (inB & mask));
                     if (out)
                     {
                         gateOutputs.push_back({x, y, z});
                         gateOutVal.push_back(out);
+                        gateOutWidth.push_back(w);
                     }
                     break;
                 }
                 case BlockType::DFlipFlop:
                 {
                     uint8_t storedQ = world.getPower(x, y, z);
-                    uint8_t dIn = powerAt(x + 1, y, z);        // D on +X (full 8-bit)
+                    uint8_t storedW = world.getPowerWidth(x, y, z);
+                    if (storedW == 0)
+                        storedW = 8;
+                    uint8_t storedMask = storedW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << storedW) - 1u);
+                    storedQ &= storedMask;
+                    uint8_t dIn = powerAt(x + 1, y, z);        // D on +X
+                    uint8_t dW = widthAt(x + 1, y, z);
+                    if (dW == 0)
+                        dW = 8;
                     uint8_t clk = powerAt(x - 1, y, z) ? 1 : 0; // CLK on -X (bool)
                     uint8_t prevClk = world.getButtonState(x, y, z) ? 1 : 0;
                     uint8_t nextQ = storedQ;
+                    uint8_t nextW = storedW ? storedW : dW;
                     if (clk && !prevClk)
-                        nextQ = dIn; // latch on rising edge
+                    {
+                        uint8_t mask = dW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << dW) - 1u);
+                        nextQ = static_cast<uint8_t>(dIn & mask); // latch on rising edge
+                        nextW = dW;
+                    }
 
                     if (nextQ)
                     {
                         gateOutputs.push_back({x, y, z});
                         gateOutVal.push_back(nextQ);
+                        gateOutWidth.push_back(nextW);
                     }
 
                     next[idx(x, y, z)] = nextQ;
+                    nextWidth[idx(x, y, z)] = nextW;
                     int flat = idx(x, y, z);
                     dffNextClk[flat] = clk ? 1 : 0;
                     dffIndices.push_back(flat);
@@ -418,41 +501,61 @@ void updateLogic(World &world)
                 }
                 case BlockType::AddGate:
                 {
-                    uint8_t p = powerAt(x - 1, y, z);   // P on -X
-                    uint8_t q = powerAt(x + 1, y, z);   // Q on +X
-                    uint8_t cin = powerAt(x, y, z - 1); // Cin on -Z (non-zero treated as 1)
+                    uint8_t wP = widthAt(x - 1, y, z);
+                    uint8_t wQ = widthAt(x + 1, y, z);
+                    uint8_t bitWidth = static_cast<uint8_t>(std::min<uint8_t>(std::max<uint8_t>(wP ? wP : 1, wQ ? wQ : 1), 8));
+                    if (bitWidth == 0)
+                        bitWidth = 1;
+                    uint8_t mask = bitWidth >= 8 ? 0xFFu : static_cast<uint8_t>((1u << bitWidth) - 1u);
+
+                    uint8_t p = powerAt(x - 1, y, z) & mask;   // P on -X
+                    uint8_t q = powerAt(x + 1, y, z) & mask;   // Q on +X
+                    uint8_t cin = powerAt(x, y, z - 1) ? 1 : 0; // Cin on -Z (bool)
                     uint16_t res = static_cast<uint16_t>(p) + static_cast<uint16_t>(q) +
-                                   (cin ? 1u : 0u);
-                    uint8_t sum = static_cast<uint8_t>(res & 0xFFu);
-                    uint8_t cout = (res >> 8) ? 0xFF : 0x00;
+                                   static_cast<uint16_t>(cin);
+                    uint8_t sum = static_cast<uint8_t>(res & mask);
+                    uint8_t cout = (res >> bitWidth) ? 0xFF : 0x00;
                     if (sum)
                     {
                         addSumOutputs.push_back({x, y, z});
                         addSumVal.push_back(sum);
+                        addSumWidth.push_back(bitWidth);
                     }
                     if (cout)
                     {
                         addCoutOutputs.push_back({x, y, z});
                         addCoutVal.push_back(cout);
+                        addCoutWidth.push_back(1);
                     }
                     out = 0;
                     break;
                 }
                 case BlockType::NotGate:
                 {
-                    uint8_t inA = powerAt(x + 1, y, z); // input on +X (right)
-                    out = static_cast<uint8_t>(~inA);
+                    uint8_t w = widthAt(x + 1, y, z);
+                    if (w == 0)
+                        w = 8;
+                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) - 1u);
+                    uint8_t inA = powerAt(x + 1, y, z) & mask; // input on +X (right)
+                    out = static_cast<uint8_t>(~inA & mask);
                     if (out)
                     {
                         notOutputs.push_back({x, y, z});
                         notOutVal.push_back(out);
+                        notOutWidth.push_back(w);
                     }
                     break;
                 }
                 case BlockType::Button:
                 {
                     uint8_t active = world.getButtonState(x, y, z) ? 1 : 0;
-                    out = active ? world.getButtonValue(x, y, z) : 0;
+                    uint8_t width = world.getButtonWidth(x, y, z);
+                    if (width == 0)
+                        width = 8;
+                    uint8_t mask = (width >= 8) ? 0xFFu : static_cast<uint8_t>((1u << width) - 1u);
+                    out = active ? static_cast<uint8_t>(world.getButtonValue(x, y, z) & mask) : 0;
+                    if (out)
+                        nextWidth[idx(x, y, z)] = width;
                     break;
                 }
                 case BlockType::Counter:
@@ -460,6 +563,7 @@ void updateLogic(World &world)
                     // Single input on +X
                     uint8_t val = powerAt(x + 1, y, z);
                     next[idx(x, y, z)] = val;
+                    nextWidth[idx(x, y, z)] = widthAt(x + 1, y, z);
                     out = 0;
                     break;
                 }
@@ -471,6 +575,7 @@ void updateLogic(World &world)
                 {
                     sourcesVal[idx(x, y, z)] = out;
                     next[idx(x, y, z)] = out;
+                    nextWidth[idx(x, y, z)] = world.getButtonWidth(x, y, z);
                 }
             }
         }
@@ -482,18 +587,7 @@ void updateLogic(World &world)
         if (sourcesVal[i])
             queue.push_back(i);
 
-    auto setPower = [&](int x, int y, int z, uint8_t val)
-    {
-        if (!world.inside(x, y, z))
-            return;
-        int i = idx(x, y, z);
-        if (next[i] == 0)
-            next[i] = val;
-        else
-            next[i] |= val;
-    };
-
-    auto pushWire = [&](int x, int y, int z, uint8_t val)
+    auto setPower = [&](int x, int y, int z, uint8_t val, uint8_t width)
     {
         if (!world.inside(x, y, z))
             return;
@@ -501,11 +595,36 @@ void updateLogic(World &world)
         if (next[i] == 0)
         {
             next[i] = val;
+            nextWidth[i] = width == 0 ? 8 : width;
+        }
+        else
+        {
+            next[i] |= val;
+            nextWidth[i] = std::max<uint8_t>(nextWidth[i], width == 0 ? 8 : width);
+        }
+    };
+
+    auto pushWire = [&](int x, int y, int z, uint8_t val, uint8_t width)
+    {
+        if (!world.inside(x, y, z))
+            return;
+        int i = idx(x, y, z);
+        uint8_t clampedW = width == 0 ? 8 : width;
+        if (next[i] == 0)
+        {
+            next[i] = val;
+            nextWidth[i] = clampedW;
             queue.push_back(i);
         }
         else if ((next[i] | val) != next[i])
         {
             next[i] |= val;
+            nextWidth[i] = std::max<uint8_t>(nextWidth[i], clampedW);
+            queue.push_back(i);
+        }
+        else if (clampedW > nextWidth[i])
+        {
+            nextWidth[i] = clampedW;
             queue.push_back(i);
         }
     };
@@ -514,6 +633,7 @@ void updateLogic(World &world)
     {
         const auto &g = gateOutputs[idxOut];
         uint8_t val = gateOutVal[idxOut];
+        uint8_t w = gateOutWidth[idxOut];
         int ox = g[0];
         int oy = g[1];
         int oz = g[2] + 1;
@@ -523,15 +643,11 @@ void updateLogic(World &world)
         BlockType outB = world.get(ox, oy, oz);
         if (outB == BlockType::Wire)
         {
-            if (next[outIdx] == 0)
-                next[outIdx] = val;
-            else
-                next[outIdx] |= val;
-            queue.push_back(outIdx);
+            pushWire(ox, oy, oz, val, w);
         }
         else
         {
-            setPower(ox, oy, oz, val);
+            setPower(ox, oy, oz, val, w);
         }
     }
 
@@ -539,6 +655,7 @@ void updateLogic(World &world)
     {
         const auto &g = addSumOutputs[idxOut];
         uint8_t val = addSumVal[idxOut];
+        uint8_t w = addSumWidth[idxOut];
         int ox = g[0];
         int oy = g[1];
         int oz = g[2] + 1; // S toward +Z
@@ -548,15 +665,11 @@ void updateLogic(World &world)
         BlockType outB = world.get(ox, oy, oz);
         if (outB == BlockType::Wire)
         {
-            if (next[outIdx] == 0)
-                next[outIdx] = val;
-            else
-                next[outIdx] |= val;
-            queue.push_back(outIdx);
+            pushWire(ox, oy, oz, val, w);
         }
         else
         {
-            setPower(ox, oy, oz, val);
+            setPower(ox, oy, oz, val, w);
         }
     }
 
@@ -564,6 +677,7 @@ void updateLogic(World &world)
     {
         const auto &g = addCoutOutputs[idxOut];
         uint8_t val = addCoutVal[idxOut];
+        uint8_t w = addCoutWidth[idxOut];
         int ox = g[0];
         int oy = g[1] - 1; // Cout downward
         int oz = g[2];
@@ -573,15 +687,11 @@ void updateLogic(World &world)
         BlockType outB = world.get(ox, oy, oz);
         if (outB == BlockType::Wire)
         {
-            if (next[outIdx] == 0)
-                next[outIdx] = val;
-            else
-                next[outIdx] |= val;
-            queue.push_back(outIdx);
+            pushWire(ox, oy, oz, val, w);
         }
         else
         {
-            setPower(ox, oy, oz, val);
+            setPower(ox, oy, oz, val, w);
         }
     }
 
@@ -590,6 +700,7 @@ void updateLogic(World &world)
     {
         const auto &g = notOutputs[idxOut];
         uint8_t val = notOutVal[idxOut];
+        uint8_t w = notOutWidth[idxOut];
         int ox = g[0] - 1;
         int oy = g[1];
         int oz = g[2];
@@ -599,15 +710,11 @@ void updateLogic(World &world)
         BlockType outB = world.get(ox, oy, oz);
         if (outB == BlockType::Wire)
         {
-            if (next[outIdx] == 0)
-                next[outIdx] = val;
-            else
-                next[outIdx] |= val;
-            queue.push_back(outIdx);
+            pushWire(ox, oy, oz, val, w);
         }
         else
         {
-            setPower(ox, oy, oz, val);
+            setPower(ox, oy, oz, val, w);
         }
     }
 
@@ -630,7 +737,7 @@ void updateLogic(World &world)
                 continue;
             BlockType nb = world.get(xx, yy, zz);
             if (nb == BlockType::Wire)
-                pushWire(xx, yy, zz, valHere);
+                pushWire(xx, yy, zz, valHere, nextWidth[i]);
         }
     }
 
@@ -683,5 +790,5 @@ void updateLogic(World &world)
             }
         }
     }
-    world.overwritePower(next);
+    world.overwritePower(next, nextWidth);
 }

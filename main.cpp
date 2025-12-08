@@ -1068,10 +1068,10 @@ void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Con
     drawTextTiny(s.backX + 22.0f, s.backY + 14.0f, 2.6f, "Retour", 1.0f, 0.98f, 0.92f, 1.0f);
 }
 
-void drawButtonEditBox(int winW, int winH, const std::string &text)
+void drawButtonEditBox(int winW, int winH, const std::string &valueText, const std::string &widthText, bool widthFocused)
 {
-    float boxW = 360.0f;
-    float boxH = 180.0f;
+    float boxW = 380.0f;
+    float boxH = 230.0f;
     float x = (winW - boxW) * 0.5f;
     float y = (winH - boxH) * 0.5f;
     drawQuad(x - 6.0f, y - 6.0f, boxW + 12.0f, boxH + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f);
@@ -1079,11 +1079,53 @@ void drawButtonEditBox(int winW, int winH, const std::string &text)
     drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
     float textX = x + 18.0f;
     float textY = y + 20.0f;
-    drawTextTiny(textX, textY, 2.0f, "Valeur du bouton (0-255)", 1.0f, 0.95f, 0.85f, 1.0f);
-    drawQuad(textX, textY + 22.0f, boxW - 36.0f, 36.0f, 0.12f, 0.12f, 0.14f, 0.85f);
-    drawOutline(textX, textY + 22.0f, boxW - 36.0f, 36.0f, 1.0f, 1.0f, 1.0f, 0.25f, 2.0f);
-    drawTextTiny(textX + 6.0f, textY + 32.0f, 2.0f, text.empty() ? "0" : text, 1.0f, 1.0f, 1.0f, 1.0f);
-    drawTextTiny(textX, textY + 70.0f, 1.5f, "Entrer pour valider, Esc pour annuler", 0.85f, 0.85f, 0.85f, 1.0f);
+
+    auto drawField = [&](const char *label, float yOffset, const std::string &txt, bool focused)
+    {
+        drawTextTiny(textX, textY + yOffset, 2.0f, label, 1.0f, 0.95f, 0.85f, 1.0f);
+        float boxY = textY + yOffset + 22.0f;
+        float outline = focused ? 0.55f : 0.25f;
+        drawQuad(textX, boxY, boxW - 36.0f, 36.0f, 0.12f, 0.12f, 0.14f, 0.85f);
+        drawOutline(textX, boxY, boxW - 36.0f, 36.0f, 1.0f, 1.0f, 1.0f, outline, 2.0f);
+        drawTextTiny(textX + 6.0f, boxY + 10.0f, 2.0f, txt.empty() ? "0" : txt, 1.0f, 1.0f, 1.0f, 1.0f);
+    };
+
+    drawField("Valeur du bouton (0-255)", 0.0f, valueText, !widthFocused);
+    drawField("Largeur du bus (1-8 bits)", 68.0f, widthText, widthFocused);
+    drawTextTiny(textX, textY + 150.0f, 1.5f, "Tab pour changer de champ, Entrer pour valider, Esc pour annuler",
+                 0.85f, 0.85f, 0.85f, 1.0f);
+}
+
+void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value)
+{
+    float boxW = 360.0f;
+    float boxH = 200.0f;
+    float x = (winW - boxW) * 0.5f;
+    float y = (winH - boxH) * 0.5f;
+    drawQuad(x - 6.0f, y - 6.0f, boxW + 12.0f, boxH + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f);
+    drawQuad(x, y, boxW, boxH, 0.05f, 0.05f, 0.06f, 0.92f);
+    drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+
+    float textX = x + 18.0f;
+    float textY = y + 22.0f;
+
+    char buf[128];
+    std::snprintf(buf, sizeof(buf), "Largeur du bus : %u bit%s", static_cast<unsigned>(width),
+                  width > 1 ? "s" : "");
+    drawTextTiny(textX, textY, 2.2f, buf, 1.0f, 0.95f, 0.9f, 1.0f);
+
+    std::snprintf(buf, sizeof(buf), "Valeur decimale : %u", static_cast<unsigned>(value));
+    drawTextTiny(textX, textY + 28.0f, 2.0f, buf, 1.0f, 1.0f, 1.0f, 1.0f);
+
+    std::string bin;
+    bin.reserve(width ? width : 8);
+    uint8_t w = width ? width : 8;
+    for (int i = static_cast<int>(w) - 1; i >= 0; --i)
+        bin.push_back((value & (1u << i)) ? '1' : '0');
+    std::snprintf(buf, sizeof(buf), "Valeur binaire : %s", bin.c_str());
+    drawTextTiny(textX, textY + 56.0f, 2.0f, buf, 1.0f, 1.0f, 1.0f, 1.0f);
+
+    drawTextTiny(textX, textY + 100.0f, 1.5f, "Appuyer sur Esc pour fermer", 0.85f, 0.85f, 0.85f, 1.0f);
 }
 
 // ---------- Config ----------
@@ -1141,7 +1183,7 @@ static const char *MAPS_DIR = "maps";
 struct SaveHeader
 {
     char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
-    uint32_t version = 6;
+    uint32_t version = 8;
     uint32_t w = 0, h = 0, d = 0;
     uint32_t seed = 0;
 };
@@ -1168,10 +1210,12 @@ bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
         uint8_t p = world.getPower(x, y, z);
         uint8_t btn = world.getButtonState(x, y, z);
         uint8_t btnVal = world.getButtonValue(x, y, z);
+        uint8_t btnWidth = world.getButtonWidth(x, y, z);
         out.write(reinterpret_cast<const char *>(&b), 1);
         out.write(reinterpret_cast<const char *>(&p), 1);
         out.write(reinterpret_cast<const char *>(&btn), 1);
         out.write(reinterpret_cast<const char *>(&btnVal), 1);
+        out.write(reinterpret_cast<const char *>(&btnWidth), 1);
     }
 
     // Save sign texts (only for version >= 2)
@@ -1214,7 +1258,7 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
         return false;
     if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3 && hdr.version != 4 && hdr.version != 5 &&
-        hdr.version != 6)
+        hdr.version != 6 && hdr.version != 7 && hdr.version != 8)
         return false;
     if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
         hdr.d != static_cast<uint32_t>(world.getDepth()))
@@ -1224,11 +1268,16 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     for (int i = 0; i < total; ++i)
     {
         uint8_t b = 0, p = 0, btn = 0, btnVal = 255;
+        uint8_t btnWidth = 0;
         in.read(reinterpret_cast<char *>(&b), 1);
         in.read(reinterpret_cast<char *>(&p), 1);
         in.read(reinterpret_cast<char *>(&btn), 1);
         if (hdr.version >= 6)
             in.read(reinterpret_cast<char *>(&btnVal), 1);
+        if (hdr.version >= 7)
+            in.read(reinterpret_cast<char *>(&btnWidth), 1);
+        else if (b == static_cast<uint8_t>(BlockType::Button))
+            btnWidth = 8; // legacy saves assume full 8-bit buttons
         if (!in)
             return false;
 
@@ -1257,7 +1306,16 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
         world.setPower(x, y, z, p);
         world.setButtonState(x, y, z, btn);
         if (b == static_cast<uint8_t>(BlockType::Button))
+        {
+            // For maps saved before version 8, force default 1-bit value = 1
+            if (hdr.version < 8)
+            {
+                btnWidth = 1;
+                btnVal = 1;
+            }
+            world.setButtonWidth(x, y, z, btnWidth == 0 ? 8 : btnWidth);
             world.setButtonValue(x, y, z, btnVal);
+        }
     }
 
     // Load sign texts for version >= 2
@@ -1349,6 +1407,12 @@ std::string gSignEditBuffer;
 bool gButtonEditOpen = false;
 int gButtonEditX = 0, gButtonEditY = 0, gButtonEditZ = 0;
 std::string gButtonEditBuffer;
+std::string gButtonWidthBuffer;
+bool gButtonEditingWidth = false;
+bool gWireInfoOpen = false;
+int gWireInfoX = 0, gWireInfoY = 0, gWireInfoZ = 0;
+uint8_t gWireInfoWidth = 0;
+uint8_t gWireInfoValue = 0;
 bool gMainMenuOpen = true;
 bool gSettingsMenuOpen = false;
 Config gConfig;
@@ -2165,7 +2229,7 @@ int main()
         }
 
         // Applique la souris lissée ici pour stabiliser la camera
-        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gMainMenuOpen)
+        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gWireInfoOpen && !gMainMenuOpen)
         {
             const float sensitivity = gConfig.mouseSensitivity;
             player.yaw += smoothDX * sensitivity;
@@ -2225,6 +2289,12 @@ int main()
                         gButtonEditOpen = false;
                         SDL_StopTextInput();
                     }
+                    else if (gWireInfoOpen)
+                    {
+                        gWireInfoOpen = false;
+                        SDL_SetRelativeMouseMode(SDL_TRUE);
+                        SDL_ShowCursor(SDL_FALSE);
+                    }
                     else if (pauseMenuOpen)
                     {
                         pauseMenuOpen = false;
@@ -2247,7 +2317,7 @@ int main()
                         smoothDX = smoothDY = 0.0f;
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen)
+                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gWireInfoOpen)
                 {
                     inventoryOpen = !inventoryOpen;
                     pendingSlot = -1;
@@ -2269,7 +2339,7 @@ int main()
                         SDL_SetWindowFullscreen(window, 0);
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen && !gButtonEditOpen)
+                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen && !gButtonEditOpen && !gWireInfoOpen)
                 {
                     float spawnX = WIDTH * 0.5f;
                     float spawnZ = DEPTH * 0.5f;
@@ -2295,7 +2365,7 @@ int main()
                     player.y = static_cast<float>(checkY) + 0.2f;
                 }
                 else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_8 && !gSignEditOpen &&
-                         !gButtonEditOpen)
+                         !gButtonEditOpen && !gWireInfoOpen)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
                     if (selected >= static_cast<int>(hotbarSlots.size()))
@@ -2310,6 +2380,10 @@ int main()
                 {
                     if (!gSignEditBuffer.empty())
                         gSignEditBuffer.pop_back();
+                }
+                else if (gButtonEditOpen && e.key.keysym.sym == SDLK_TAB)
+                {
+                    gButtonEditingWidth = !gButtonEditingWidth;
                 }
                 else if (saveMenuOpen && e.key.keysym.sym == SDLK_TAB)
                 {
@@ -2329,13 +2403,22 @@ int main()
                 }
                 else if (gButtonEditOpen && e.key.keysym.sym == SDLK_BACKSPACE)
                 {
-                    if (!gButtonEditBuffer.empty())
-                        gButtonEditBuffer.pop_back();
+                    if (gButtonEditingWidth)
+                    {
+                        if (!gButtonWidthBuffer.empty())
+                            gButtonWidthBuffer.pop_back();
+                    }
+                    else
+                    {
+                        if (!gButtonEditBuffer.empty())
+                            gButtonEditBuffer.pop_back();
+                    }
                 }
                 else if (gButtonEditOpen &&
                          (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
                 {
                     int v = 0;
+                    int width = 8;
                     try
                     {
                         v = std::stoi(gButtonEditBuffer.empty() ? "0" : gButtonEditBuffer);
@@ -2344,7 +2427,19 @@ int main()
                     {
                         v = 0;
                     }
+                    try
+                    {
+                        width = std::stoi(gButtonWidthBuffer.empty() ? "8" : gButtonWidthBuffer);
+                    }
+                    catch (...)
+                    {
+                        width = 8;
+                    }
+                    width = std::clamp(width, 1, 8);
                     v = std::clamp(v, 0, 255);
+                    uint8_t mask = width >= 8 ? 0xFFu : static_cast<uint8_t>((1u << width) - 1u);
+                    v &= mask;
+                    world.setButtonWidth(gButtonEditX, gButtonEditY, gButtonEditZ, static_cast<uint8_t>(width));
                     world.setButtonValue(gButtonEditX, gButtonEditY, gButtonEditZ, static_cast<uint8_t>(v));
                     gButtonEditOpen = false;
                     SDL_StopTextInput();
@@ -2354,7 +2449,7 @@ int main()
                     gButtonEditOpen = false;
                     SDL_StopTextInput();
                 }
-                else if (!gSignEditOpen && !gButtonEditOpen && !pauseMenuOpen &&
+                else if (!gSignEditOpen && !gButtonEditOpen && !gWireInfoOpen && !pauseMenuOpen &&
                          e.key.keysym.sym == SDLK_SPACE && e.key.repeat == 0)
                 {
                     if (lastSpaceTap >= 0.0f && (elapsedTime - lastSpaceTap) <= SPRINT_DOUBLE_TAP)
@@ -2365,7 +2460,7 @@ int main()
                     }
                     lastSpaceTap = elapsedTime;
                 }
-                else if (!gSignEditOpen && !gButtonEditOpen &&
+                else if (!gSignEditOpen && !gButtonEditOpen && !gWireInfoOpen &&
                          (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
                 {
                     if (lastForwardTap >= 0.0f && (elapsedTime - lastForwardTap) <= SPRINT_DOUBLE_TAP)
@@ -2375,7 +2470,7 @@ int main()
                     lastForwardTap = elapsedTime;
                 }
                 else if (e.key.keysym.sym == SDLK_q && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen &&
-                         !gButtonEditOpen)
+                         !gButtonEditOpen && !gWireInfoOpen)
                 {
                     Vec3 fwd = forwardVec(player.yaw, player.pitch);
                     float eyeY = player.y + EYE_HEIGHT;
@@ -2387,7 +2482,23 @@ int main()
                         gButtonEditY = hit.y;
                         gButtonEditZ = hit.z;
                         gButtonEditBuffer = std::to_string(world.getButtonValue(hit.x, hit.y, hit.z));
+                        gButtonWidthBuffer = std::to_string(world.getButtonWidth(hit.x, hit.y, hit.z));
+                        gButtonEditingWidth = false;
                         SDL_StartTextInput();
+                    }
+                    else if (hit.hit && world.get(hit.x, hit.y, hit.z) == BlockType::Wire)
+                    {
+                        gWireInfoOpen = true;
+                        gWireInfoX = hit.x;
+                        gWireInfoY = hit.y;
+                        gWireInfoZ = hit.z;
+                        gWireInfoWidth = world.getPowerWidth(hit.x, hit.y, hit.z);
+                        if (gWireInfoWidth == 0)
+                            gWireInfoWidth = 8;
+                        uint8_t mask = gWireInfoWidth >= 8 ? 0xFFu : static_cast<uint8_t>((1u << gWireInfoWidth) - 1u);
+                        gWireInfoValue = static_cast<uint8_t>(world.getPower(hit.x, hit.y, hit.z) & mask);
+                        SDL_SetRelativeMouseMode(SDL_FALSE);
+                        SDL_ShowCursor(SDL_TRUE);
                     }
                 }
             }
@@ -2395,7 +2506,7 @@ int main()
             {
                 mouseX = e.motion.x;
                 mouseY = e.motion.y;
-                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gMainMenuOpen)
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gWireInfoOpen && !gMainMenuOpen)
                 {
                     // Filtre de la souris pour lisser les mouvements et limiter les saccades
                     smoothDX = smoothDX * 0.6f + static_cast<float>(e.motion.xrel) * 0.4f;
@@ -2404,7 +2515,7 @@ int main()
             }
             else if (e.type == SDL_MOUSEWHEEL)
             {
-                if (!inventoryOpen && !pauseMenuOpen)
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gWireInfoOpen && !gMainMenuOpen)
                 {
                     if (e.wheel.y > 0)
                     {
@@ -2452,14 +2563,25 @@ int main()
                             gSignEditBuffer.push_back(c);
                     }
                 }
-                else if (gButtonEditOpen)
-                {
-                    const char *txt = e.text.text;
-                    for (int i = 0; txt[i] != '\0'; ++i)
-                    {
+        else if (gButtonEditOpen)
+        {
+            const char *txt = e.text.text;
+            for (int i = 0; txt[i] != '\0'; ++i)
+            {
                         char c = txt[i];
-                        if (c >= '0' && c <= '9' && gButtonEditBuffer.size() < 3)
-                            gButtonEditBuffer.push_back(c);
+                        if (c >= '0' && c <= '9')
+                        {
+                            if (gButtonEditingWidth)
+                            {
+                                if (gButtonWidthBuffer.size() < 2)
+                                    gButtonWidthBuffer.push_back(c);
+                            }
+                            else
+                            {
+                                if (gButtonEditBuffer.size() < 3)
+                                    gButtonEditBuffer.push_back(c);
+                            }
+                        }
                     }
                 }
             }
@@ -2735,7 +2857,7 @@ int main()
             }
         }
 
-        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gMainMenuOpen) ? 0.0f : dt;
+        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gWireInfoOpen || gMainMenuOpen) ? 0.0f : dt;
 
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         // Movement uses a purely horizontal forward vector (independent of pitch)
@@ -2796,7 +2918,7 @@ int main()
                 }
             }
         }
-        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen || gButtonEditOpen)
+        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gWireInfoOpen)
         {
             sprinting = false;
         }
@@ -3038,7 +3160,19 @@ int main()
         if (gSignEditOpen)
             drawSignEditBox(winW, winH, gSignEditBuffer);
         if (gButtonEditOpen)
-            drawButtonEditBox(winW, winH, gButtonEditBuffer);
+            drawButtonEditBox(winW, winH, gButtonEditBuffer, gButtonWidthBuffer, gButtonEditingWidth);
+        if (gWireInfoOpen)
+        {
+            if (world.inside(gWireInfoX, gWireInfoY, gWireInfoZ))
+            {
+                gWireInfoWidth = world.getPowerWidth(gWireInfoX, gWireInfoY, gWireInfoZ);
+                if (gWireInfoWidth == 0)
+                    gWireInfoWidth = 8;
+                uint8_t mask = gWireInfoWidth >= 8 ? 0xFFu : static_cast<uint8_t>((1u << gWireInfoWidth) - 1u);
+                gWireInfoValue = static_cast<uint8_t>(world.getPower(gWireInfoX, gWireInfoY, gWireInfoZ) & mask);
+            }
+            drawWireInfoBox(winW, winH, gWireInfoWidth, gWireInfoValue);
+        }
         endHud();
 
         SDL_GL_SwapWindow(window);
