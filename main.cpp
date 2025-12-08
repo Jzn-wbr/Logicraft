@@ -935,6 +935,7 @@ struct Config
     float mouseSensitivity = 0.011f;
     bool fullscreenDefault = false;
     bool showFps = false;
+    bool vsync = true;
 };
 
 struct MainMenuLayout
@@ -1002,6 +1003,7 @@ struct SettingsMenuLayout
     float sensMinusX = 0, sensMinusY = 0, sensMinusW = 0, sensMinusH = 0;
     float sensPlusX = 0, sensPlusY = 0, sensPlusW = 0, sensPlusH = 0;
     float fpsBoxX = 0, fpsBoxY = 0, fpsBoxW = 0, fpsBoxH = 0;
+    float vsyncBoxX = 0, vsyncBoxY = 0, vsyncBoxW = 0, vsyncBoxH = 0;
     float fullscreenBoxX = 0, fullscreenBoxY = 0, fullscreenBoxW = 0, fullscreenBoxH = 0;
 };
 
@@ -1024,6 +1026,10 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
     s.fpsBoxH = 22.0f;
     s.fpsBoxX = s.panelX + 220.0f;
     s.fpsBoxY = s.panelY + 164.0f;
+    s.vsyncBoxW = 22.0f;
+    s.vsyncBoxH = 22.0f;
+    s.vsyncBoxX = s.panelX + 220.0f;
+    s.vsyncBoxY = s.panelY + 206.0f;
     s.fullscreenBoxW = 22.0f;
     s.fullscreenBoxH = 22.0f;
     s.fullscreenBoxX = s.panelX + 220.0f;
@@ -1036,7 +1042,7 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
 }
 
 void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Config &cfg, bool hoverBack,
-                      bool hoverMinus, bool hoverPlus, bool hoverFps, bool hoverFullscreen)
+                      bool hoverMinus, bool hoverPlus, bool hoverFps, bool hoverVsync, bool hoverFullscreen)
 {
     drawQuad(0, 0, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.35f);
     drawQuad(s.panelX, s.panelY, s.panelW, s.panelH, 0.05f, 0.06f, 0.08f, 0.92f);
@@ -1061,7 +1067,13 @@ void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Con
     if (cfg.showFps)
         drawTextTiny(s.fpsBoxX + 5.0f, s.fpsBoxY + 5.0f, 2.4f, "X", 1.0f, 0.98f, 0.92f, 1.0f);
 
-    drawTextTiny(s.panelX + 24.0f, s.panelY + 240.0f, 2.6f, "Fenetration", 0.95f, 0.95f, 0.95f, 1.0f);
+    drawTextTiny(s.panelX + 24.0f, s.panelY + 212.0f, 2.6f, "Vsync", 0.95f, 0.95f, 0.95f, 1.0f);
+    drawQuad(s.vsyncBoxX, s.vsyncBoxY, s.vsyncBoxW, s.vsyncBoxH, hoverVsync ? 0.3f : 0.18f, 0.18f, 0.18f, 0.9f);
+    drawOutline(s.vsyncBoxX, s.vsyncBoxY, s.vsyncBoxW, s.vsyncBoxH, 1.0f, 1.0f, 1.0f, 0.25f, hoverVsync ? 2.5f : 2.0f);
+    if (cfg.vsync)
+        drawTextTiny(s.vsyncBoxX + 5.0f, s.vsyncBoxY + 5.0f, 2.4f, "X", 1.0f, 0.98f, 0.92f, 1.0f);
+
+    drawTextTiny(s.panelX + 24.0f, s.panelY + 250.0f, 2.6f, "Fenetration", 0.95f, 0.95f, 0.95f, 1.0f);
     drawQuad(s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH, hoverFullscreen ? 0.3f : 0.18f,
              0.18f, 0.18f, 0.9f);
     drawOutline(s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH, 1.0f, 1.0f, 1.0f, 0.25f,
@@ -1203,6 +1215,10 @@ void loadConfig(Config &cfg)
         {
             cfg.showFps = (val == "1" || val == "true" || val == "yes");
         }
+        else if (key == "vsync")
+        {
+            cfg.vsync = (val == "1" || val == "true" || val == "yes");
+        }
     }
 }
 
@@ -1214,6 +1230,7 @@ void saveConfig(const Config &cfg)
     out << "mouse_sensitivity=" << cfg.mouseSensitivity << "\n";
     out << "fullscreen=" << (cfg.fullscreenDefault ? 1 : 0) << "\n";
     out << "show_fps=" << (cfg.showFps ? 1 : 0) << "\n";
+    out << "vsync=" << (cfg.vsync ? 1 : 0) << "\n";
 }
 
 // ---------- Save / Load ----------
@@ -2216,7 +2233,7 @@ int main()
         SDL_Quit();
         return 1;
     }
-    SDL_GL_SetSwapInterval(1);
+    SDL_GL_SetSwapInterval(gConfig.vsync ? 1 : 0);
 
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK)
@@ -2789,6 +2806,7 @@ int main()
                         bool hoverMinus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensMinusX, s.sensMinusY, s.sensMinusW, s.sensMinusH);
                         bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY, s.sensPlusW, s.sensPlusH);
                         bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH);
+                        bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY, s.vsyncBoxW, s.vsyncBoxH);
                         bool hoverFullscreen = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH);
                         bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW, s.backH);
                         if (hoverMinus)
@@ -2804,6 +2822,12 @@ int main()
                         else if (hoverFps)
                         {
                             gConfig.showFps = !gConfig.showFps;
+                            saveConfig(gConfig);
+                        }
+                        else if (hoverVsync)
+                        {
+                            gConfig.vsync = !gConfig.vsync;
+                            SDL_GL_SetSwapInterval(gConfig.vsync ? 1 : 0);
                             saveConfig(gConfig);
                         }
                         else if (hoverFullscreen)
@@ -2855,6 +2879,7 @@ int main()
                         bool hoverMinus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensMinusX, s.sensMinusY, s.sensMinusW, s.sensMinusH);
                         bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY, s.sensPlusW, s.sensPlusH);
                         bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH);
+                        bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY, s.vsyncBoxW, s.vsyncBoxH);
                         bool hoverFullscreen = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH);
                         bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW, s.backH);
                         if (hoverMinus)
@@ -2870,6 +2895,12 @@ int main()
                         else if (hoverFps)
                         {
                             gConfig.showFps = !gConfig.showFps;
+                            saveConfig(gConfig);
+                        }
+                        else if (hoverVsync)
+                        {
+                            gConfig.vsync = !gConfig.vsync;
+                            SDL_GL_SetSwapInterval(gConfig.vsync ? 1 : 0);
                             saveConfig(gConfig);
                         }
                         else if (hoverFullscreen)
@@ -3209,9 +3240,11 @@ int main()
             player.vy = 0.0f;
         }
 
-        player.vx *= 0.85f;
-        player.vy *= 0.85f;
-        player.vz *= 0.85f;
+        // Frame-rate independent damping (was frame-based 0.85)
+        float damp = std::pow(0.85f, simDt / (1.0f / 60.0f));
+        player.vx *= damp;
+        player.vy *= damp;
+        player.vz *= damp;
 
         updateNpc(npc, world, simDt);
         updateNpc(npc2, world, simDt);
@@ -3247,12 +3280,14 @@ int main()
                                              s.sensPlusW, s.sensPlusH);
                 bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
                                             s.fpsBoxW, s.fpsBoxH);
+                bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY,
+                                               s.vsyncBoxW, s.vsyncBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
                 bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW,
                                              s.backH);
-                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
+                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverVsync, hoverFullscreen);
             }
             endHud();
             SDL_GL_SwapWindow(window);
@@ -3385,12 +3420,14 @@ int main()
                                              s.sensPlusW, s.sensPlusH);
                 bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
                                             s.fpsBoxW, s.fpsBoxH);
+                bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY,
+                                               s.vsyncBoxW, s.vsyncBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
                 bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW,
                                              s.backH);
-                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
+                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverVsync, hoverFullscreen);
             }
             else if (saveMenuOpen)
             {
