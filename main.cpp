@@ -969,7 +969,7 @@ void drawMainMenu(int winW, int winH, const MainMenuLayout &l, bool hoverPlay, b
     drawQuad(l.titleX - 220.0f, l.titleY - 48.0f, 440.0f, 120.0f, 0.2f, 0.25f, 0.5f, glow);
     drawOutline(l.titleX - 220.0f, l.titleY - 48.0f, 440.0f, 120.0f, 1.0f, 1.0f, 1.0f, 0.12f, 3.0f);
     drawTextTiny(l.titleX - 200.0f, l.titleY, 8.0f, "SigmaCraft", 1.0f, 0.97f, 0.9f, 1.0f);
-    drawTextTiny(l.titleX - 200.0f, l.titleY - 70.0f, 3.4f, "Version 2.0 dispo !", 1.0f, 0.9f, 0.3f, 1.0f);
+    drawTextTiny(l.titleX - 200.0f, l.titleY - 70.0f, 3.4f, "Version 2.1 dispo !", 1.0f, 0.9f, 0.3f, 1.0f);
     drawTextTiny(l.titleX + 110.0f, l.titleY - 62.0f, 2.0f, "Bus 8 bits, nouveaux blocs, menu, ...", 0.95f, 0.92f, 0.85f, 0.9f);
     drawTextTiny(l.titleX - 200.0f, l.titleY + 100.0f, 3.2f, "Logic sandbox, made yours", 0.9f, 0.9f, 1.0f, 0.85f);
 
