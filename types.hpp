@@ -29,7 +29,9 @@ enum class BlockType
     Sign,
     DFlipFlop,
     AddGate,
-    Counter
+    Counter,
+    Splitter,
+    Merger
 };
 
 struct BlockInfo

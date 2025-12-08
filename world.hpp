@@ -30,6 +30,10 @@ public:
     void setButtonValue(int x, int y, int z, uint8_t v);
     uint8_t getButtonWidth(int x, int y, int z) const;
     void setButtonWidth(int x, int y, int z, uint8_t bits);
+    uint8_t getSplitterWidth(int x, int y, int z) const;
+    void setSplitterWidth(int x, int y, int z, uint8_t bits);
+    uint8_t getSplitterOrder(int x, int y, int z) const;
+    void setSplitterOrder(int x, int y, int z, uint8_t order);
     void toggleButton(int x, int y, int z);
     int index(int x, int y, int z) const;
     int totalSize() const;
@@ -54,6 +58,8 @@ private:
     std::vector<uint8_t> buttonState;
     std::vector<uint8_t> buttonValue;
     std::vector<uint8_t> buttonWidth;
+    std::vector<uint8_t> splitterWidth;
+    std::vector<uint8_t> splitterOrder;
     std::vector<std::string> signText;
 };
 

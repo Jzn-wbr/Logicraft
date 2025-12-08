@@ -29,17 +29,19 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Button, {"Button", true, {0.6f, 0.2f, 0.2f}}},
     {BlockType::Wire, {"Wire", true, {0.55f, 0.55f, 0.58f}}},
     {BlockType::Sign, {"Sign", false, {0.85f, 0.7f, 0.45f}}},
+    {BlockType::Splitter, {"Splitter", true, {0.2f, 0.75f, 0.7f}}},
+    {BlockType::Merger, {"Merger", true, {0.75f, 0.4f, 0.85f}}},
 };
 
 const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
                                        BlockType::Stone, BlockType::Glass, BlockType::NotGate,
-                                       BlockType::Sign, BlockType::XorGate};
+                                       BlockType::Splitter, BlockType::Merger};
 const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
                                                   BlockType::Stone, BlockType::Glass, BlockType::AndGate,
                                                   BlockType::OrGate, BlockType::NotGate, BlockType::XorGate,
                                                   BlockType::DFlipFlop, BlockType::AddGate, BlockType::Counter,
                                                   BlockType::Led,      BlockType::Button,   BlockType::Wire,
-                                                  BlockType::Sign};
+                                                  BlockType::Sign,     BlockType::Splitter, BlockType::Merger};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -64,7 +66,8 @@ bool isTransparent(BlockType b)
 World::World(int w, int h, int d)
     : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), power(w * h * d, 0),
       powerWidth(w * h * d, 8), buttonState(w * h * d, 0), buttonValue(w * h * d, 0),
-      buttonWidth(w * h * d, 0), signText(w * h * d)
+      buttonWidth(w * h * d, 0), splitterWidth(w * h * d, 1), splitterOrder(w * h * d, 0),
+      signText(w * h * d)
 {
 }
 
@@ -86,6 +89,16 @@ void World::set(int x, int y, int z, BlockType b)
     {
         buttonValue[idx] = 1; // default button payload is 1 (1-bit)
         buttonWidth[idx] = 1; // default to 1-bit bus
+    }
+    if (b != BlockType::Splitter)
+    {
+        splitterWidth[idx] = 1;
+        splitterOrder[idx] = 0;
+    }
+    if (b != BlockType::Merger)
+    {
+        splitterWidth[idx] = 1;
+        splitterOrder[idx] = 0;
     }
     if (b != BlockType::Sign)
         signText[idx].clear();
@@ -126,6 +139,19 @@ void World::setButtonWidth(int x, int y, int z, uint8_t bits)
     buttonValue[i] &= mask; // trim stored payload to the new width
 }
 
+uint8_t World::getSplitterWidth(int x, int y, int z) const { return splitterWidth[index(x, y, z)]; }
+void World::setSplitterWidth(int x, int y, int z, uint8_t bits)
+{
+    int i = index(x, y, z);
+    splitterWidth[i] = static_cast<uint8_t>(std::clamp<int>(bits, 1, 7));
+}
+uint8_t World::getSplitterOrder(int x, int y, int z) const { return splitterOrder[index(x, y, z)]; }
+void World::setSplitterOrder(int x, int y, int z, uint8_t order)
+{
+    int i = index(x, y, z);
+    splitterOrder[i] = static_cast<uint8_t>(order & 0x1u);
+}
+
 void World::toggleButton(int x, int y, int z)
 {
     int idx = index(x, y, z);
@@ -156,6 +182,8 @@ void World::generate(unsigned seed)
     std::fill(powerWidth.begin(), powerWidth.end(), 8);
     std::fill(buttonState.begin(), buttonState.end(), 0);
     std::fill(buttonWidth.begin(), buttonWidth.end(), 0);
+    std::fill(splitterWidth.begin(), splitterWidth.end(), 1);
+    std::fill(splitterOrder.begin(), splitterOrder.end(), 0);
     for (int z = 0; z < depth; ++z)
     {
         for (int x = 0; x < width; ++x)
@@ -394,7 +422,53 @@ void updateLogic(World &world)
             return 8;
         return world.getPowerWidth(x, y, z);
     };
+    auto setPower = [&](int x, int y, int z, uint8_t val, uint8_t width)
+    {
+        if (!world.inside(x, y, z))
+            return;
+        int i = idx(x, y, z);
+        if (next[i] == 0)
+        {
+            next[i] = val;
+            nextWidth[i] = width == 0 ? 8 : width;
+        }
+        else
+        {
+            next[i] |= val;
+            nextWidth[i] = std::max<uint8_t>(nextWidth[i], width == 0 ? 8 : width);
+        }
+    };
+    std::vector<int> queue;
+    queue.reserve(total / 4);
+    auto pushWire = [&](int x, int y, int z, uint8_t val, uint8_t width)
+    {
+        if (!world.inside(x, y, z))
+            return;
+        int i = idx(x, y, z);
+        uint8_t clampedW = width == 0 ? 8 : width;
+        if (next[i] == 0)
+        {
+            next[i] = val;
+            nextWidth[i] = clampedW;
+            queue.push_back(i);
+        }
+        else if ((next[i] | val) != next[i])
+        {
+            next[i] |= val;
+            nextWidth[i] = std::max<uint8_t>(nextWidth[i], clampedW);
+            queue.push_back(i);
+        }
+        else if (clampedW > nextWidth[i])
+        {
+            nextWidth[i] = clampedW;
+            queue.push_back(i);
+        }
+    };
 
+    for (int y = 0; y < world.getHeight(); ++y)
+        for (int z = 0; z < world.getDepth(); ++z)
+            for (int x = 0; x < world.getWidth(); ++x)
+                nextWidth[idx(x, y, z)] = world.getPowerWidth(x, y, z);
     for (int y = 0; y < world.getHeight(); ++y)
         for (int z = 0; z < world.getDepth(); ++z)
             for (int x = 0; x < world.getWidth(); ++x)
@@ -567,6 +641,64 @@ void updateLogic(World &world)
                     out = 0;
                     break;
                 }
+                case BlockType::Splitter:
+                {
+                    uint8_t busW = widthAt(x, y, z - 1);
+                    if (busW == 0)
+                        busW = 1;
+                    uint8_t busMask = busW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << busW) - 1u);
+                    uint8_t busVal = powerAt(x, y, z - 1) & busMask;
+                    uint8_t wParam = world.getSplitterWidth(x, y, z);
+                    uint8_t order = world.getSplitterOrder(x, y, z);
+                    uint8_t w1 = std::clamp<uint8_t>(wParam, 1, static_cast<uint8_t>(std::max<int>(1, busW - 1)));
+                    uint8_t w2 = static_cast<uint8_t>(std::max<int>(1, busW - w1));
+                    uint8_t mask1 = w1 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w1) - 1u);
+                    uint8_t mask2 = w2 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w2) - 1u);
+                    uint8_t out1 = 0, out2 = 0;
+                    if (order == 0)
+                    {
+                        out1 = busVal & mask1;                     // LSB chunk -> B1 (-X)
+                        out2 = static_cast<uint8_t>((busVal >> w1) & mask2); // remaining -> B2 (+X)
+                    }
+                    else
+                    {
+                        out2 = busVal & mask2;                     // LSB chunk -> B2 (+X)
+                        out1 = static_cast<uint8_t>((busVal >> w2) & mask1); // MSB chunk -> B1 (-X)
+                    }
+                    if (out1)
+                        pushWire(x - 1, y, z, out1, w1); // B1 on -X
+                    if (out2)
+                        pushWire(x + 1, y, z, out2, w2); // B2 on +X
+                    out = 0;
+                    break;
+                }
+                case BlockType::Merger:
+                {
+                    uint8_t wParam = world.getSplitterWidth(x, y, z);
+                    uint8_t order = world.getSplitterOrder(x, y, z);
+                    uint8_t inW1 = widthAt(x - 1, y, z);
+                    uint8_t inW2 = widthAt(x + 1, y, z);
+                    if (inW1 == 0)
+                        inW1 = 8;
+                    if (inW2 == 0)
+                        inW2 = 8;
+                    uint8_t w1 = std::clamp<uint8_t>(wParam, 1, 7);
+                    uint8_t w2 = static_cast<uint8_t>(std::max<int>(1, std::min<int>(8 - w1, inW2)));
+                    uint8_t mask1 = w1 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w1) - 1u);
+                    uint8_t mask2 = w2 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w2) - 1u);
+                    uint8_t in1 = powerAt(x - 1, y, z) & mask1;
+                    uint8_t in2 = powerAt(x + 1, y, z) & mask2;
+                    uint8_t busW = static_cast<uint8_t>(std::min<int>(8, w1 + w2));
+                    uint8_t busVal = 0;
+                    if (order == 0)
+                        busVal = static_cast<uint8_t>(in1 | static_cast<uint8_t>(in2 << w1)); // B1 in LSB
+                    else
+                        busVal = static_cast<uint8_t>((in1 << w2) | in2); // B1 in MSB
+                    if (busVal)
+                        pushWire(x, y, z + 1, busVal, busW); // BUS out on +Z
+                    out = 0;
+                    break;
+                }
                 default:
                     out = 0;
                     break;
@@ -581,53 +713,9 @@ void updateLogic(World &world)
         }
     }
 
-    std::vector<int> queue;
-    queue.reserve(total / 4);
     for (int i = 0; i < total; ++i)
         if (sourcesVal[i])
             queue.push_back(i);
-
-    auto setPower = [&](int x, int y, int z, uint8_t val, uint8_t width)
-    {
-        if (!world.inside(x, y, z))
-            return;
-        int i = idx(x, y, z);
-        if (next[i] == 0)
-        {
-            next[i] = val;
-            nextWidth[i] = width == 0 ? 8 : width;
-        }
-        else
-        {
-            next[i] |= val;
-            nextWidth[i] = std::max<uint8_t>(nextWidth[i], width == 0 ? 8 : width);
-        }
-    };
-
-    auto pushWire = [&](int x, int y, int z, uint8_t val, uint8_t width)
-    {
-        if (!world.inside(x, y, z))
-            return;
-        int i = idx(x, y, z);
-        uint8_t clampedW = width == 0 ? 8 : width;
-        if (next[i] == 0)
-        {
-            next[i] = val;
-            nextWidth[i] = clampedW;
-            queue.push_back(i);
-        }
-        else if ((next[i] | val) != next[i])
-        {
-            next[i] |= val;
-            nextWidth[i] = std::max<uint8_t>(nextWidth[i], clampedW);
-            queue.push_back(i);
-        }
-        else if (clampedW > nextWidth[i])
-        {
-            nextWidth[i] = clampedW;
-            queue.push_back(i);
-        }
-    };
 
     for (size_t idxOut = 0; idxOut < gateOutputs.size(); ++idxOut)
     {
@@ -639,7 +727,6 @@ void updateLogic(World &world)
         int oz = g[2] + 1;
         if (!world.inside(ox, oy, oz))
             continue;
-        int outIdx = idx(ox, oy, oz);
         BlockType outB = world.get(ox, oy, oz);
         if (outB == BlockType::Wire)
         {
@@ -661,7 +748,6 @@ void updateLogic(World &world)
         int oz = g[2] + 1; // S toward +Z
         if (!world.inside(ox, oy, oz))
             continue;
-        int outIdx = idx(ox, oy, oz);
         BlockType outB = world.get(ox, oy, oz);
         if (outB == BlockType::Wire)
         {
@@ -683,7 +769,6 @@ void updateLogic(World &world)
         int oz = g[2];
         if (!world.inside(ox, oy, oz))
             continue;
-        int outIdx = idx(ox, oy, oz);
         BlockType outB = world.get(ox, oy, oz);
         if (outB == BlockType::Wire)
         {
@@ -706,7 +791,6 @@ void updateLogic(World &world)
         int oz = g[2];
         if (!world.inside(ox, oy, oz))
             continue;
-        int outIdx = idx(ox, oy, oz);
         BlockType outB = world.get(ox, oy, oz);
         if (outB == BlockType::Wire)
         {

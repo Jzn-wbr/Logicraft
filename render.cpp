@@ -15,7 +15,7 @@ int CHUNK_Z_COUNT = 0;
 std::vector<ChunkMesh> chunkMeshes;
 GLuint gAtlasTex = 0;
 const int ATLAS_COLS = 4;
-const int ATLAS_ROWS = 8;
+const int ATLAS_ROWS = 9; // increased to fit new gate tiles
 const int ATLAS_TILE_SIZE = 32;
 std::map<BlockType, int> gBlockTile;
 int gAndTopTile = 0;
@@ -27,6 +27,8 @@ int gAddTopTile = 0;
 int gAddBottomTile = 0;
 int gAddBackTile = 0;
 int gCounterTopTile = 0;
+int gSplitterTopTile = 0;
+int gMergerTopTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 7;
 const int INV_ROWS = 4;
@@ -228,7 +230,8 @@ void blitTinyTextToTile(std::vector<uint8_t> &pix, int texW, int tileIdx, int x,
 }
 
 void drawGateTopLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
-                       const std::string &gateLabel)
+                       const std::string &gateLabel, const char *left = "IN", const char *right = "IN",
+                       const char *out = "OUT")
 {
     auto toByte = [](float v, float mul)
     {
@@ -264,36 +267,38 @@ void drawGateTopLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const s
 
     int labelScale = 1;
     int labelHeight = 5 * labelScale;
-    int inWidth = tinyTextWidthOnTile("IN", labelScale);
-    int outWidth = tinyTextWidthOnTile("OUT", labelScale);
+    int leftWidth = tinyTextWidthOnTile(left, labelScale);
+    int rightWidth = tinyTextWidthOnTile(right, labelScale);
+    int outWidth = tinyTextWidthOnTile(out, labelScale);
     int gateWidth = tinyTextWidthOnTile(gateLabel, labelScale);
 
     int inY = ATLAS_TILE_SIZE - labelHeight - 3;
     int outY = 4;
-    int gateY = midY + 4;
+    int gateY = midY - 2;
 
-    fillRect(pix, texW, tileX + 1, tileY + inY - 1, inWidth + 4, labelHeight + 2, bgR, bgG, bgB, 255);
-    fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - inWidth - 5, tileY + inY - 1, inWidth + 4, labelHeight + 2, bgR,
-             bgG, bgB, 255);
+    fillRect(pix, texW, tileX + 1, tileY + inY - 1, leftWidth + 4, labelHeight + 2, bgR, bgG, bgB, 255);
+    fillRect(pix, texW, tileX + ATLAS_TILE_SIZE - rightWidth - 5, tileY + inY - 1, rightWidth + 4, labelHeight + 2,
+             bgR, bgG, bgB, 255);
     fillRect(pix, texW, tileX + (ATLAS_TILE_SIZE - outWidth) / 2 - 2, tileY + outY - 1, outWidth + 4,
              labelHeight + 2, bgR, bgG, bgB, 255);
     fillRect(pix, texW, tileX + (ATLAS_TILE_SIZE - gateWidth) / 2 - 2, tileY + gateY - 1, gateWidth + 4,
              labelHeight + 2, bgR, bgG, bgB, 255);
 
-    blitTinyTextToTile(pix, texW, tileIdx, 2, inY, "IN", labelScale, textR, textG, textB, 255);
-    int rightX = ATLAS_TILE_SIZE - inWidth - 2;
-    blitTinyTextToTile(pix, texW, tileIdx, rightX, inY, "IN", labelScale, textR, textG, textB, 255);
+    blitTinyTextToTile(pix, texW, tileIdx, 2, inY, left, labelScale, textR, textG, textB, 255);
+    int rightX = ATLAS_TILE_SIZE - rightWidth - 2;
+    blitTinyTextToTile(pix, texW, tileIdx, rightX, inY, right, labelScale, textR, textG, textB, 255);
     int outX = (ATLAS_TILE_SIZE - outWidth) / 2;
-    blitTinyTextToTile(pix, texW, tileIdx, outX, outY, "OUT", labelScale, textR, textG, textB, 255);
+    blitTinyTextToTile(pix, texW, tileIdx, outX, outY, out, labelScale, textR, textG, textB, 255);
     int gateX = (ATLAS_TILE_SIZE - gateWidth) / 2;
     blitTinyTextToTile(pix, texW, tileIdx, gateX, gateY, gateLabel, labelScale, textR, textG, textB, 255);
 }
 
 void fillGateTileWithLabels(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
-                            int styleSeed, const std::string &gateLabel)
+                            int styleSeed, const std::string &gateLabel, const char *left = "IN",
+                            const char *right = "IN", const char *out = "OUT")
 {
     fillTile(pix, texW, tileIdx, baseColor, styleSeed);
-    drawGateTopLabels(pix, texW, tileIdx, baseColor, gateLabel);
+    drawGateTopLabels(pix, texW, tileIdx, baseColor, gateLabel, left, right, out);
 }
 
 void fillNotGateTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor,
@@ -656,7 +661,7 @@ void drawSkybox(GLuint cubemap, float size)
 }
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::XorGate, 13}, {BlockType::Led, 14}, {BlockType::Button, 15}, {BlockType::Wire, 16}, {BlockType::Sign, 17}, {BlockType::DFlipFlop, 18}, {BlockType::AddGate, 19}, {BlockType::Counter, 20}};
+    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::XorGate, 13}, {BlockType::Led, 14}, {BlockType::Button, 15}, {BlockType::Wire, 16}, {BlockType::Sign, 17}, {BlockType::DFlipFlop, 18}, {BlockType::AddGate, 19}, {BlockType::Counter, 20}, {BlockType::Splitter, 21}, {BlockType::Merger, 22}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
     gAndTopTile = nextTile++;
@@ -668,6 +673,8 @@ void createAtlasTexture()
     gAddBottomTile = nextTile++;
     gAddBackTile = nextTile++;
     gCounterTopTile = nextTile++;
+    gSplitterTopTile = nextTile++;
+    gMergerTopTile = nextTile++;
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
     int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
@@ -679,6 +686,7 @@ void createAtlasTexture()
     maxTileIdx = std::max(maxTileIdx,
                           std::max(std::max(gDffTopTile, gAddTopTile), std::max(gAddBottomTile, gAddBackTile)));
     maxTileIdx = std::max(maxTileIdx, gCounterTopTile);
+    maxTileIdx = std::max(maxTileIdx, std::max(gSplitterTopTile, gMergerTopTile));
     if (maxTileIdx >= atlasCapacity)
     {
         std::cerr << "Atlas capacity too small for gate labels.\n";
@@ -710,6 +718,8 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire), 19);
     fillTile(pixels, texW, gBlockTile[BlockType::NotGate], base(BlockType::NotGate), 20);
     fillTile(pixels, texW, gBlockTile[BlockType::Sign], base(BlockType::Sign), 1);
+    fillTile(pixels, texW, gBlockTile[BlockType::Splitter], base(BlockType::Splitter), 22);
+    fillTile(pixels, texW, gBlockTile[BlockType::Merger], base(BlockType::Merger), 23);
     fillGateTileWithLabels(pixels, texW, gAndTopTile, base(BlockType::AndGate), 15, "AND");
     fillGateTileWithLabels(pixels, texW, gOrTopTile, base(BlockType::OrGate), 16, "OR");
     fillGateTileWithLabels(pixels, texW, gXorTopTile, base(BlockType::XorGate), 17, "XOR");
@@ -719,6 +729,8 @@ void createAtlasTexture()
     fillAddBottomTile(pixels, texW, gAddBottomTile, base(BlockType::AddGate), 25);
     fillAddBackTile(pixels, texW, gAddBackTile, base(BlockType::AddGate), 25);
     fillCounterTopTile(pixels, texW, gCounterTopTile, base(BlockType::Counter), 12);
+    fillGateTileWithLabels(pixels, texW, gSplitterTopTile, base(BlockType::Splitter), 22, "SPLIT");
+    fillGateTileWithLabels(pixels, texW, gMergerTopTile, base(BlockType::Merger), 23, "MERGER", "B2", "B1", "BUS");
 
     if (gAtlasTex == 0)
     {
@@ -935,6 +947,10 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             return gAddTopTile;
                         if (b == BlockType::Counter)
                             return gCounterTopTile;
+                        if (b == BlockType::Splitter)
+                            return gSplitterTopTile;
+                        if (b == BlockType::Merger)
+                            return gMergerTopTile;
                     }
                     if (ny == -1 && b == BlockType::AddGate)
                         return gAddBottomTile;
@@ -987,8 +1003,27 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             }
                             return false;
                         }
+                        if (nb == BlockType::Splitter)
+                        {
+                            // BUS on -Z (in), B1 on -X (out), B2 on +X (out)
+                            if (dx == -1 || dx == 1)
+                                return true;
+                            if (dz == 1)
+                                return true; // BUS side (wire is at z-1, so from wire view dz=+1)
+                            return false;
+                        }
+                        if (nb == BlockType::Merger)
+                        {
+                            // B1 on -X (in), B2 on +X (in), BUS on +Z (out)
+                            if (dx == -1 || dx == 1)
+                                return true; // inputs
+                            if (dz == -1)
+                                return true; // BUS side (+Z face of merger)
+                            return false;
+                        }
                         return nb == BlockType::Wire || nb == BlockType::Button || nb == BlockType::Led ||
-                               nb == BlockType::AndGate || nb == BlockType::OrGate || nb == BlockType::DFlipFlop;
+                               nb == BlockType::AndGate || nb == BlockType::OrGate || nb == BlockType::DFlipFlop ||
+                               nb == BlockType::Counter;
                     };
 
                     float cx = static_cast<float>(x) + 0.5f;
