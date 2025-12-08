@@ -31,17 +31,20 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Sign, {"Sign", false, {0.85f, 0.7f, 0.45f}}},
     {BlockType::Splitter, {"Splitter", true, {0.2f, 0.75f, 0.7f}}},
     {BlockType::Merger, {"Merger", true, {0.75f, 0.4f, 0.85f}}},
+    {BlockType::Decoder, {"Decoder", true, {0.35f, 0.55f, 0.85f}}},
+    {BlockType::Multiplexer, {"Mux", true, {0.55f, 0.35f, 0.85f}}},
 };
 
 const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
                                        BlockType::Stone, BlockType::Glass, BlockType::NotGate,
                                        BlockType::Splitter, BlockType::Merger};
-const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
-                                                  BlockType::Stone, BlockType::Glass, BlockType::AndGate,
-                                                  BlockType::OrGate, BlockType::NotGate, BlockType::XorGate,
+const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Grass,     BlockType::Wood,
+                                                  BlockType::Stone, BlockType::Glass,     BlockType::AndGate,
+                                                  BlockType::OrGate, BlockType::NotGate,  BlockType::XorGate,
                                                   BlockType::DFlipFlop, BlockType::AddGate, BlockType::Counter,
-                                                  BlockType::Led,      BlockType::Button,   BlockType::Wire,
-                                                  BlockType::Sign,     BlockType::Splitter, BlockType::Merger};
+                                                  BlockType::Led,   BlockType::Button,    BlockType::Wire,
+                                                  BlockType::Sign,  BlockType::Splitter,  BlockType::Merger,
+                                                  BlockType::Decoder, BlockType::Multiplexer};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -696,6 +699,64 @@ void updateLogic(World &world)
                         busVal = static_cast<uint8_t>((in1 << w2) | in2); // B1 in MSB
                     if (busVal)
                         pushWire(x, y, z + 1, busVal, busW); // BUS out on +Z
+                    out = 0;
+                    break;
+                }
+                case BlockType::Decoder:
+                {
+                    uint8_t selW = widthAt(x - 1, y, z);
+                    if (selW == 0)
+                        selW = 8;
+                    uint8_t effectiveSelW = std::max<uint8_t>(1, std::min<uint8_t>(selW, 3)); // clamp to 1-3 bits (up to 8 outs)
+                    uint8_t selMask = effectiveSelW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << effectiveSelW) - 1u);
+                    uint8_t selVal = powerAt(x - 1, y, z) & selMask;
+                    bool enable = (powerAt(x + 1, y, z) & 0x1u) != 0;
+                    if (enable)
+                    {
+                        uint8_t bit = static_cast<uint8_t>(selVal & 0x7u);
+                        if (bit < 8)
+                        {
+                            uint8_t outVal = static_cast<uint8_t>(1u << bit);
+                            uint8_t outW = static_cast<uint8_t>(1u << effectiveSelW);
+                            pushWire(x, y, z + 1, outVal, outW);
+                        }
+                    }
+                    out = 0;
+                    break;
+                }
+                case BlockType::Multiplexer:
+                {
+                    uint8_t selW = widthAt(x - 1, y, z);
+                    if (selW == 0)
+                        selW = 8;
+                    uint8_t effectiveSelW = std::max<uint8_t>(1, std::min<uint8_t>(selW, 2)); // 2 bits max
+                    uint8_t selMask = static_cast<uint8_t>((1u << effectiveSelW) - 1u);
+                    uint8_t selVal = powerAt(x - 1, y, z) & selMask;
+
+                    auto inputVal = [&](int dx, int dy, int dz, uint8_t &wOut) -> uint8_t
+                    {
+                        wOut = widthAt(x + dx, y + dy, z + dz);
+                        if (wOut == 0)
+                            wOut = 8;
+                        uint8_t mask = wOut >= 8 ? 0xFFu : static_cast<uint8_t>((1u << wOut) - 1u);
+                        return static_cast<uint8_t>(powerAt(x + dx, y + dy, z + dz) & mask);
+                    };
+
+                    uint8_t widths[4] = {0, 0, 0, 0};
+                    uint8_t values[4] = {0, 0, 0, 0};
+                    // Inputs: 0=-Z, 1=+Z, 2=-Y, 3=+Y
+                    values[0] = inputVal(0, 0, -1, widths[0]);
+                    values[1] = inputVal(0, 0, 1, widths[1]);
+                    values[2] = inputVal(0, -1, 0, widths[2]);
+                    values[3] = inputVal(0, 1, 0, widths[3]);
+
+                    uint8_t idxSel = static_cast<uint8_t>(selVal & 0x3u);
+                    uint8_t outVal = values[idxSel];
+                    uint8_t outWidth = widths[idxSel];
+                    if (outVal)
+                        pushWire(x + 1, y, z, outVal, outWidth);
+                    else
+                        setPower(x + 1, y, z, 0, outWidth);
                     out = 0;
                     break;
                 }

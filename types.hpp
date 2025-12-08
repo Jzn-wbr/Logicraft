@@ -31,7 +31,9 @@ enum class BlockType
     AddGate,
     Counter,
     Splitter,
-    Merger
+    Merger,
+    Decoder,
+    Multiplexer
 };
 
 struct BlockInfo

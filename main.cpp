@@ -977,8 +977,8 @@ void drawMainMenu(int winW, int winH, const MainMenuLayout &l, bool hoverPlay, b
     drawQuad(l.titleX - 220.0f, l.titleY - 48.0f, 440.0f, 120.0f, 0.2f, 0.25f, 0.5f, glow);
     drawOutline(l.titleX - 220.0f, l.titleY - 48.0f, 440.0f, 120.0f, 1.0f, 1.0f, 1.0f, 0.12f, 3.0f);
     drawTextTiny(l.titleX - 200.0f, l.titleY, 8.0f, "SigmaCraft", 1.0f, 0.97f, 0.9f, 1.0f);
-    drawTextTiny(l.titleX - 200.0f, l.titleY - 70.0f, 3.4f, "Version 2.1 dispo !", 1.0f, 0.9f, 0.3f, 1.0f);
-    drawTextTiny(l.titleX + 110.0f, l.titleY - 62.0f, 2.0f, "Bus 8 bits, nouveaux blocs, menu, ...", 0.95f, 0.92f, 0.85f, 0.9f);
+    drawTextTiny(l.titleX - 200.0f, l.titleY - 70.0f, 3.4f, "Version 2.1.3 dispo !", 1.0f, 0.9f, 0.3f, 1.0f);
+    drawTextTiny(l.titleX + 110.0f, l.titleY - 62.0f, 2.0f, "Bus 8 bits, nouveaux blocs, reglages, ...", 0.95f, 0.92f, 0.85f, 0.9f);
     drawTextTiny(l.titleX - 200.0f, l.titleY + 100.0f, 3.2f, "Logic sandbox, made yours", 0.9f, 0.9f, 1.0f, 0.85f);
 
     auto drawBtn = [&](float x, float y, float w, float h, const char *label, bool hover)
@@ -1765,6 +1765,40 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         float textX = x + (slotSize - textWidth) * 0.5f;
         float textY = y + slotSize * 0.38f;
         drawTextTiny(textX, textY, txtSize, label, 1.0f, 1.0f, 1.0f, 1.0f);
+        glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::Multiplexer:
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glLineWidth(2.0f);
+        float pad = slotSize * 0.2f;
+        drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
+        float txtSize = 1.4f;
+        float textWidth = static_cast<float>(std::strlen("MUX")) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
+        float textX = x + (slotSize - textWidth) * 0.5f;
+        float textY = y + slotSize * 0.4f;
+        drawTextTiny(textX, textY, txtSize, "MUX", 1.0f, 1.0f, 1.0f, 1.0f);
+        drawTextTiny(x + pad + 2.0f, y + slotSize - pad - 10.0f, 1.0f, "SEL", 1.0f, 1.0f, 1.0f, 0.85f);
+        drawTextTiny(x + slotSize - pad - 12.0f, y + slotSize - pad - 10.0f, 1.0f, "0", 1.0f, 1.0f, 1.0f, 0.85f);
+        drawTextTiny(x + slotSize * 0.35f, y + pad - 4.0f, 1.0f, "OUT", 1.0f, 1.0f, 1.0f, 0.85f);
+        glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::Decoder:
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glLineWidth(2.0f);
+        float pad = slotSize * 0.2f;
+        drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
+        float txtSize = 1.5f;
+        float textWidth = static_cast<float>(std::strlen("DEC")) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
+        float textX = x + (slotSize - textWidth) * 0.5f;
+        float textY = y + slotSize * 0.4f;
+        drawTextTiny(textX, textY, txtSize, "DEC", 1.0f, 1.0f, 1.0f, 1.0f);
+        drawTextTiny(x + pad + 2.0f, y + slotSize - pad - 10.0f, 1.0f, "SEL", 1.0f, 1.0f, 1.0f, 0.85f);
+        drawTextTiny(x + slotSize - pad - 12.0f, y + slotSize - pad - 10.0f, 1.0f, "EN", 1.0f, 1.0f, 1.0f, 0.85f);
+        drawTextTiny(x + slotSize * 0.35f, y + pad - 4.0f, 1.0f, "OUT", 1.0f, 1.0f, 1.0f, 0.85f);
         glLineWidth(1.0f);
         break;
     }
@@ -3212,7 +3246,7 @@ int main()
                 bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY,
                                              s.sensPlusW, s.sensPlusH);
                 bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
-                                             s.fpsBoxW, s.fpsBoxH);
+                                            s.fpsBoxW, s.fpsBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
@@ -3350,7 +3384,7 @@ int main()
                 bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY,
                                              s.sensPlusW, s.sensPlusH);
                 bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
-                                             s.fpsBoxW, s.fpsBoxH);
+                                            s.fpsBoxW, s.fpsBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
