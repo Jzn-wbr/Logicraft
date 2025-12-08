@@ -77,6 +77,7 @@ struct PauseMenuLayout
     float panelX = 0.0f, panelY = 0.0f, panelW = 0.0f, panelH = 0.0f;
     float resumeX = 0.0f, resumeY = 0.0f, resumeW = 0.0f, resumeH = 0.0f;
     float manageX = 0.0f, manageY = 0.0f, manageW = 0.0f, manageH = 0.0f;
+    float settingsX = 0.0f, settingsY = 0.0f, settingsW = 0.0f, settingsH = 0.0f;
     float quitX = 0.0f, quitY = 0.0f, quitW = 0.0f, quitH = 0.0f;
 };
 

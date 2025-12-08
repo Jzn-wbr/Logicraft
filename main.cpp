@@ -678,7 +678,7 @@ PauseMenuLayout computePauseLayout(int winW, int winH)
 {
     PauseMenuLayout l;
     l.panelW = 520.0f;
-    l.panelH = 330.0f;
+    l.panelH = 420.0f;
     l.panelX = (winW - l.panelW) * 0.5f;
     l.panelY = (winH - l.panelH) * 0.5f;
 
@@ -692,10 +692,15 @@ PauseMenuLayout computePauseLayout(int winW, int winH)
     l.manageX = l.resumeX;
     l.manageY = l.resumeY + l.resumeH + 24.0f;
 
+    l.settingsW = l.resumeW;
+    l.settingsH = 56.0f;
+    l.settingsX = l.resumeX;
+    l.settingsY = l.manageY + l.manageH + 24.0f;
+
     l.quitW = l.resumeW;
     l.quitH = 56.0f;
     l.quitX = l.resumeX;
-    l.quitY = l.manageY + l.manageH + 24.0f;
+    l.quitY = l.settingsY + l.settingsH + 24.0f;
     return l;
 }
 
@@ -740,7 +745,7 @@ SaveMenuLayout computeSaveMenuLayout(int winW, int winH)
     return s;
 }
 
-void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResume, bool hoverManage, bool hoverQuit)
+void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResume, bool hoverManage, bool hoverSettings, bool hoverQuit)
 {
     drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.55f);
     drawQuad(l.panelX, l.panelY, l.panelW, l.panelH, 0.05f, 0.05f, 0.08f, 0.92f);
@@ -755,6 +760,7 @@ void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResum
 
     drawButton(l.resumeX, l.resumeY, l.resumeW, l.resumeH, 0.16f, 0.55f, 0.25f, hoverResume);
     drawButton(l.manageX, l.manageY, l.manageW, l.manageH, 0.2f, 0.4f, 0.8f, hoverManage);
+    drawButton(l.settingsX, l.settingsY, l.settingsW, l.settingsH, 0.35f, 0.2f, 0.7f, hoverSettings);
     drawButton(l.quitX, l.quitY, l.quitW, l.quitH, 0.65f, 0.18f, 0.12f, hoverQuit);
 
     auto centerTinyText = [](float x, float y, float w, float size, const std::string &txt, float r, float g, float b,
@@ -770,6 +776,8 @@ void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResum
                    hoverResume ? 1.0f : 0.9f);
     centerTinyText(l.manageX, l.manageY + l.manageH * 0.33f, l.manageW, labelSize, "SAVE / LOAD", 1.0f, 1.0f, 1.0f,
                    hoverManage ? 1.0f : 0.9f);
+    centerTinyText(l.settingsX, l.settingsY + l.settingsH * 0.33f, l.settingsW, labelSize, "REGLAGES", 1.0f, 1.0f, 1.0f,
+                   hoverSettings ? 1.0f : 0.9f);
     centerTinyText(l.quitX, l.quitY + l.quitH * 0.33f, l.quitW, labelSize, "QUIT", 1.0f, 1.0f, 1.0f,
                    hoverQuit ? 1.0f : 0.9f);
 }
@@ -925,8 +933,8 @@ void drawSignEditBox(int winW, int winH, const std::string &text)
 struct Config
 {
     float mouseSensitivity = 0.011f;
-    bool invertY = false;
     bool fullscreenDefault = false;
+    bool showFps = false;
 };
 
 struct MainMenuLayout
@@ -993,7 +1001,7 @@ struct SettingsMenuLayout
     float backX = 0, backY = 0, backW = 0, backH = 0;
     float sensMinusX = 0, sensMinusY = 0, sensMinusW = 0, sensMinusH = 0;
     float sensPlusX = 0, sensPlusY = 0, sensPlusW = 0, sensPlusH = 0;
-    float invertBoxX = 0, invertBoxY = 0, invertBoxW = 0, invertBoxH = 0;
+    float fpsBoxX = 0, fpsBoxY = 0, fpsBoxW = 0, fpsBoxH = 0;
     float fullscreenBoxX = 0, fullscreenBoxY = 0, fullscreenBoxW = 0, fullscreenBoxH = 0;
 };
 
@@ -1012,10 +1020,10 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
     s.sensPlusH = 36.0f;
     s.sensPlusX = s.sensMinusX + 150.0f;
     s.sensPlusY = s.sensMinusY;
-    s.invertBoxW = 22.0f;
-    s.invertBoxH = 22.0f;
-    s.invertBoxX = s.panelX + 220.0f;
-    s.invertBoxY = s.panelY + 164.0f;
+    s.fpsBoxW = 22.0f;
+    s.fpsBoxH = 22.0f;
+    s.fpsBoxX = s.panelX + 220.0f;
+    s.fpsBoxY = s.panelY + 164.0f;
     s.fullscreenBoxW = 22.0f;
     s.fullscreenBoxH = 22.0f;
     s.fullscreenBoxX = s.panelX + 220.0f;
@@ -1028,7 +1036,7 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
 }
 
 void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Config &cfg, bool hoverBack,
-                      bool hoverMinus, bool hoverPlus, bool hoverInvert, bool hoverFullscreen)
+                      bool hoverMinus, bool hoverPlus, bool hoverFps, bool hoverFullscreen)
 {
     drawQuad(0, 0, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.35f);
     drawQuad(s.panelX, s.panelY, s.panelW, s.panelH, 0.05f, 0.06f, 0.08f, 0.92f);
@@ -1047,11 +1055,11 @@ void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Con
     std::snprintf(sensBuf, sizeof(sensBuf), "%.3f", cfg.mouseSensitivity);
     drawTextTiny(s.sensMinusX + 52.0f, s.sensMinusY + 12.0f, 2.6f, sensBuf, 1.0f, 0.98f, 0.92f, 1.0f);
 
-    drawTextTiny(s.panelX + 24.0f, s.panelY + 176.0f, 2.6f, "Inverser axe Y", 0.95f, 0.95f, 0.95f, 1.0f);
-    drawQuad(s.invertBoxX, s.invertBoxY, s.invertBoxW, s.invertBoxH, hoverInvert ? 0.3f : 0.18f, 0.18f, 0.18f, 0.9f);
-    drawOutline(s.invertBoxX, s.invertBoxY, s.invertBoxW, s.invertBoxH, 1.0f, 1.0f, 1.0f, 0.25f, hoverInvert ? 2.5f : 2.0f);
-    if (cfg.invertY)
-        drawTextTiny(s.invertBoxX + 5.0f, s.invertBoxY + 5.0f, 2.4f, "X", 1.0f, 0.98f, 0.92f, 1.0f);
+    drawTextTiny(s.panelX + 24.0f, s.panelY + 176.0f, 2.6f, "Afficher FPS", 0.95f, 0.95f, 0.95f, 1.0f);
+    drawQuad(s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH, hoverFps ? 0.3f : 0.18f, 0.18f, 0.18f, 0.9f);
+    drawOutline(s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH, 1.0f, 1.0f, 1.0f, 0.25f, hoverFps ? 2.5f : 2.0f);
+    if (cfg.showFps)
+        drawTextTiny(s.fpsBoxX + 5.0f, s.fpsBoxY + 5.0f, 2.4f, "X", 1.0f, 0.98f, 0.92f, 1.0f);
 
     drawTextTiny(s.panelX + 24.0f, s.panelY + 240.0f, 2.6f, "Fenetration", 0.95f, 0.95f, 0.95f, 1.0f);
     drawQuad(s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH, hoverFullscreen ? 0.3f : 0.18f,
@@ -1187,13 +1195,13 @@ void loadConfig(Config &cfg)
             {
             }
         }
-        else if (key == "invert_y")
-        {
-            cfg.invertY = (val == "1" || val == "true" || val == "yes");
-        }
         else if (key == "fullscreen")
         {
             cfg.fullscreenDefault = (val == "1" || val == "true" || val == "yes");
+        }
+        else if (key == "show_fps")
+        {
+            cfg.showFps = (val == "1" || val == "true" || val == "yes");
         }
     }
 }
@@ -1204,8 +1212,8 @@ void saveConfig(const Config &cfg)
     if (!out)
         return;
     out << "mouse_sensitivity=" << cfg.mouseSensitivity << "\n";
-    out << "invert_y=" << (cfg.invertY ? 1 : 0) << "\n";
     out << "fullscreen=" << (cfg.fullscreenDefault ? 1 : 0) << "\n";
+    out << "show_fps=" << (cfg.showFps ? 1 : 0) << "\n";
 }
 
 // ---------- Save / Load ----------
@@ -2302,12 +2310,11 @@ int main()
         }
 
         // Applique la souris lissée ici pour stabiliser la camera
-        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen)
+        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
         {
             const float sensitivity = gConfig.mouseSensitivity;
             player.yaw += smoothDX * sensitivity;
-            float invert = gConfig.invertY ? -1.0f : 1.0f;
-            player.pitch -= smoothDY * sensitivity * invert;
+            player.pitch -= smoothDY * sensitivity;
             smoothDX *= 0.5f;
             smoothDY *= 0.5f;
             player.pitch = std::clamp(player.pitch, -1.5f, 1.5f);
@@ -2375,10 +2382,15 @@ int main()
                         SDL_SetRelativeMouseMode(SDL_TRUE);
                         SDL_ShowCursor(SDL_FALSE);
                     }
+                    else if (gSettingsMenuOpen)
+                    {
+                        gSettingsMenuOpen = false;
+                    }
                     else if (pauseMenuOpen)
                     {
                         pauseMenuOpen = false;
                         saveMenuOpen = false;
+                        gSettingsMenuOpen = false;
                         SDL_StopTextInput();
                         gSaveInputFocus = false;
                         SDL_SetRelativeMouseMode(SDL_TRUE);
@@ -2388,6 +2400,7 @@ int main()
                     {
                         pauseMenuOpen = true;
                         saveMenuOpen = false;
+                        gSettingsMenuOpen = false;
                         refreshSaveList();
                         inventoryOpen = false;
                         pendingSlot = -1;
@@ -2445,7 +2458,7 @@ int main()
                     player.y = static_cast<float>(checkY) + 0.2f;
                 }
                 else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_8 && !gSignEditOpen &&
-                         !gButtonEditOpen && !gWireInfoOpen)
+                         !gButtonEditOpen && !gWireInfoOpen && !gSplitterEditOpen)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
                     if (selected >= static_cast<int>(hotbarSlots.size()))
@@ -2637,7 +2650,7 @@ int main()
             {
                 mouseX = e.motion.x;
                 mouseY = e.motion.y;
-                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen)
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
                 {
                     // Filtre de la souris pour lisser les mouvements et limiter les saccades
                     smoothDX = smoothDX * 0.6f + static_cast<float>(e.motion.xrel) * 0.4f;
@@ -2646,7 +2659,9 @@ int main()
             }
             else if (e.type == SDL_MOUSEWHEEL)
             {
-                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen)
+                if (gSplitterEditOpen || gButtonEditOpen || gSignEditOpen || gWireInfoOpen)
+                    continue;
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
                 {
                     if (e.wheel.y > 0)
                     {
@@ -2739,7 +2754,7 @@ int main()
                         SettingsMenuLayout s = computeSettingsLayout(winW, winH);
                         bool hoverMinus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensMinusX, s.sensMinusY, s.sensMinusW, s.sensMinusH);
                         bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY, s.sensPlusW, s.sensPlusH);
-                        bool hoverInvert = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.invertBoxX, s.invertBoxY, s.invertBoxW, s.invertBoxH);
+                        bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH);
                         bool hoverFullscreen = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH);
                         bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW, s.backH);
                         if (hoverMinus)
@@ -2752,9 +2767,9 @@ int main()
                             gConfig.mouseSensitivity = std::min(0.05f, gConfig.mouseSensitivity + 0.001f);
                             saveConfig(gConfig);
                         }
-                        else if (hoverInvert)
+                        else if (hoverFps)
                         {
-                            gConfig.invertY = !gConfig.invertY;
+                            gConfig.showFps = !gConfig.showFps;
                             saveConfig(gConfig);
                         }
                         else if (hoverFullscreen)
@@ -2790,12 +2805,51 @@ int main()
                     }
                     continue;
                 }
+                if (gSignEditOpen)
+                    continue;
+                if (gSplitterEditOpen)
+                    continue;
                 if (gButtonEditOpen)
                     continue;
                 if (gButtonEditOpen)
                     continue;
                 if (pauseMenuOpen)
                 {
+                    if (gSettingsMenuOpen)
+                    {
+                        SettingsMenuLayout s = computeSettingsLayout(winW, winH);
+                        bool hoverMinus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensMinusX, s.sensMinusY, s.sensMinusW, s.sensMinusH);
+                        bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY, s.sensPlusW, s.sensPlusH);
+                        bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH);
+                        bool hoverFullscreen = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH);
+                        bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW, s.backH);
+                        if (hoverMinus)
+                        {
+                            gConfig.mouseSensitivity = std::max(0.002f, gConfig.mouseSensitivity - 0.001f);
+                            saveConfig(gConfig);
+                        }
+                        else if (hoverPlus)
+                        {
+                            gConfig.mouseSensitivity = std::min(0.05f, gConfig.mouseSensitivity + 0.001f);
+                            saveConfig(gConfig);
+                        }
+                        else if (hoverFps)
+                        {
+                            gConfig.showFps = !gConfig.showFps;
+                            saveConfig(gConfig);
+                        }
+                        else if (hoverFullscreen)
+                        {
+                            gConfig.fullscreenDefault = !gConfig.fullscreenDefault;
+                            saveConfig(gConfig);
+                            SDL_SetWindowFullscreen(window, gConfig.fullscreenDefault ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                        }
+                        else if (hoverBack)
+                        {
+                            gSettingsMenuOpen = false;
+                        }
+                        continue;
+                    }
                     if (saveMenuOpen)
                     {
                         SaveMenuLayout sm = computeSaveMenuLayout(winW, winH);
@@ -2893,11 +2947,18 @@ int main()
                                                        l.resumeY, l.resumeW, l.resumeH);
                         bool hoverManage = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.manageX,
                                                        l.manageY, l.manageW, l.manageH);
+                        bool hoverSettings = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.settingsX,
+                                                         l.settingsY, l.settingsW, l.settingsH);
                         bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX,
                                                      l.quitY, l.quitW, l.quitH);
                         if (hoverQuit)
                         {
                             running = false;
+                        }
+                        else if (hoverSettings)
+                        {
+                            gSettingsMenuOpen = true;
+                            saveMenuOpen = false;
                         }
                         else if (hoverManage)
                         {
@@ -3001,7 +3062,7 @@ int main()
             }
         }
 
-        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen || gMainMenuOpen) ? 0.0f : dt;
+        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen || gMainMenuOpen || gSettingsMenuOpen) ? 0.0f : dt;
 
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         // Movement uses a purely horizontal forward vector (independent of pitch)
@@ -3150,14 +3211,14 @@ int main()
                                               s.sensMinusY, s.sensMinusW, s.sensMinusH);
                 bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY,
                                              s.sensPlusW, s.sensPlusH);
-                bool hoverInvert = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.invertBoxX, s.invertBoxY,
-                                               s.invertBoxW, s.invertBoxH);
+                bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
+                                             s.fpsBoxW, s.fpsBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
                 bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW,
                                              s.backH);
-                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverInvert, hoverFullscreen);
+                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
             }
             endHud();
             SDL_GL_SwapWindow(window);
@@ -3265,6 +3326,14 @@ int main()
         }
 
         beginHud(winW, winH);
+        if (gConfig.showFps)
+        {
+            char fpsBuf[32];
+            std::snprintf(fpsBuf, sizeof(fpsBuf), "FPS: %.0f", fps);
+            drawQuad(10.0f, 10.0f, 120.0f, 32.0f, 0.04f, 0.04f, 0.06f, 0.65f);
+            drawOutline(10.0f, 10.0f, 120.0f, 32.0f, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+            drawTextTiny(16.0f, 16.0f, 2.4f, fpsBuf, 1.0f, 0.97f, 0.9f, 1.0f);
+        }
         if (!inventoryOpen && !pauseMenuOpen)
             drawCrosshair(winW, winH);
         drawInventoryBar(winW, winH, hotbarSlots, selected);
@@ -3273,7 +3342,23 @@ int main()
                                hoverLabel);
         if (pauseMenuOpen)
         {
-            if (saveMenuOpen)
+            if (gSettingsMenuOpen)
+            {
+                SettingsMenuLayout s = computeSettingsLayout(winW, winH);
+                bool hoverMinus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensMinusX,
+                                              s.sensMinusY, s.sensMinusW, s.sensMinusH);
+                bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY,
+                                             s.sensPlusW, s.sensPlusH);
+                bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
+                                             s.fpsBoxW, s.fpsBoxH);
+                bool hoverFullscreen =
+                    pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
+                                s.fullscreenBoxW, s.fullscreenBoxH);
+                bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW,
+                                             s.backH);
+                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
+            }
+            else if (saveMenuOpen)
             {
                 SaveMenuLayout sm = computeSaveMenuLayout(winW, winH);
                 bool hoverOverwrite = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.overwriteX,
@@ -3294,9 +3379,11 @@ int main()
                                                l.resumeW, l.resumeH);
                 bool hoverManage = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.manageX, l.manageY,
                                                l.manageW, l.manageH);
+                bool hoverSettings = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.settingsX, l.settingsY,
+                                                 l.settingsW, l.settingsH);
                 bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY, l.quitW,
                                              l.quitH);
-                drawPauseMenu(winW, winH, l, hoverResume, hoverManage, hoverQuit);
+                drawPauseMenu(winW, winH, l, hoverResume, hoverManage, hoverSettings, hoverQuit);
             }
         }
         if (hoverLabel.valid)
