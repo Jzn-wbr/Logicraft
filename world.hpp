@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 
+#include <array>
 #include <map>
 #include <vector>
 
@@ -34,6 +35,14 @@ public:
     void setSplitterWidth(int x, int y, int z, uint8_t bits);
     uint8_t getSplitterOrder(int x, int y, int z) const;
     void setSplitterOrder(int x, int y, int z, uint8_t order);
+    uint8_t getSuperInWidth(int x, int y, int z) const;
+    uint8_t getSuperOutWidth(int x, int y, int z) const;
+    void setSuperInWidth(int x, int y, int z, uint8_t bits);
+    void setSuperOutWidth(int x, int y, int z, uint8_t bits);
+    uint8_t getSuperMapBit(int x, int y, int z, int outBit) const;
+    void setSuperMapBit(int x, int y, int z, int outBit, uint8_t srcBit);
+    const std::array<uint8_t, 8> &getSuperMap(int x, int y, int z) const;
+    void setSuperMap(int x, int y, int z, const std::array<uint8_t, 8> &map);
     void toggleButton(int x, int y, int z);
     int index(int x, int y, int z) const;
     int totalSize() const;
@@ -60,6 +69,9 @@ private:
     std::vector<uint8_t> buttonWidth;
     std::vector<uint8_t> splitterWidth;
     std::vector<uint8_t> splitterOrder;
+    std::vector<uint8_t> superInWidth;
+    std::vector<uint8_t> superOutWidth;
+    std::vector<std::array<uint8_t, 8>> superMap;
     std::vector<std::string> signText;
 };
 

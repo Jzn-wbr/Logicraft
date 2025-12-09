@@ -29,6 +29,7 @@ int gAddBackTile = 0;
 int gCounterTopTile = 0;
 int gSplitterTopTile = 0;
 int gMergerTopTile = 0;
+int gSuperSplitterTopTile = 0;
 int gDecoderTopTile = 0;
 int gMuxTopTile = 0;
 int gMuxInTile[4] = {0, 0, 0, 0};
@@ -670,7 +671,32 @@ void drawSkybox(GLuint cubemap, float size)
 }
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::XorGate, 13}, {BlockType::Led, 14}, {BlockType::Button, 15}, {BlockType::Wire, 16}, {BlockType::Sign, 17}, {BlockType::DFlipFlop, 18}, {BlockType::AddGate, 19}, {BlockType::Counter, 20}, {BlockType::Splitter, 21}, {BlockType::Merger, 22}, {BlockType::Decoder, 23}, {BlockType::Multiplexer, 24}};
+    gBlockTile = {{BlockType::Grass, 0},
+                  {BlockType::Dirt, 1},
+                  {BlockType::Stone, 2},
+                  {BlockType::Wood, 3},
+                  {BlockType::Leaves, 4},
+                  {BlockType::Water, 5},
+                  {BlockType::Plank, 6},
+                  {BlockType::Sand, 7},
+                  {BlockType::Air, 8},
+                  {BlockType::Glass, 9},
+                  {BlockType::AndGate, 10},
+                  {BlockType::OrGate, 11},
+                  {BlockType::NotGate, 12},
+                  {BlockType::XorGate, 13},
+                  {BlockType::Led, 14},
+                  {BlockType::Button, 15},
+                  {BlockType::Wire, 16},
+                  {BlockType::Sign, 17},
+                  {BlockType::DFlipFlop, 18},
+                  {BlockType::AddGate, 19},
+                  {BlockType::Counter, 20},
+                  {BlockType::Splitter, 21},
+                  {BlockType::Merger, 22},
+                  {BlockType::Decoder, 23},
+                  {BlockType::Multiplexer, 24},
+                  {BlockType::SuperSplitter, 25}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
     gAndTopTile = nextTile++;
@@ -684,6 +710,7 @@ void createAtlasTexture()
     gCounterTopTile = nextTile++;
     gSplitterTopTile = nextTile++;
     gMergerTopTile = nextTile++;
+    gSuperSplitterTopTile = nextTile++;
     gDecoderTopTile = nextTile++;
     gMuxTopTile = nextTile++;
     gMuxInTile[0] = nextTile++;
@@ -701,13 +728,14 @@ void createAtlasTexture()
     maxTileIdx = std::max(maxTileIdx,
                           std::max(std::max(gDffTopTile, gAddTopTile), std::max(gAddBottomTile, gAddBackTile)));
     maxTileIdx = std::max(maxTileIdx, gCounterTopTile);
-    maxTileIdx = std::max(maxTileIdx,
-                          std::max(std::max(gSplitterTopTile, gMergerTopTile),
-                                   std::max(gDecoderTopTile,
-                                            std::max(gMuxTopTile,
-                                                     std::max(gMuxInTile[0],
-                                                              std::max(gMuxInTile[1],
-                                                                       std::max(gMuxInTile[2], gMuxInTile[3])))))));
+    maxTileIdx =
+        std::max(maxTileIdx, std::max(std::max(gSplitterTopTile, gMergerTopTile), gSuperSplitterTopTile));
+    maxTileIdx = std::max(
+        maxTileIdx,
+        std::max(gDecoderTopTile,
+                 std::max(gMuxTopTile,
+                          std::max(gMuxInTile[0],
+                                   std::max(gMuxInTile[1], std::max(gMuxInTile[2], gMuxInTile[3]))))));
     if (maxTileIdx >= atlasCapacity)
     {
         std::cerr << "Atlas capacity too small for gate labels.\n";
@@ -741,6 +769,7 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Sign], base(BlockType::Sign), 1);
     fillTile(pixels, texW, gBlockTile[BlockType::Splitter], base(BlockType::Splitter), 22);
     fillTile(pixels, texW, gBlockTile[BlockType::Merger], base(BlockType::Merger), 23);
+    fillTile(pixels, texW, gBlockTile[BlockType::SuperSplitter], base(BlockType::SuperSplitter), 24);
     fillTile(pixels, texW, gBlockTile[BlockType::Decoder], base(BlockType::Decoder), 24);
     fillTile(pixels, texW, gBlockTile[BlockType::Multiplexer], base(BlockType::Multiplexer), 26);
     fillTile(pixels, texW, gMuxInTile[0], base(BlockType::Multiplexer), 27);
@@ -763,6 +792,8 @@ void createAtlasTexture()
     fillGateTileWithLabels(pixels, texW, gSplitterTopTile, base(BlockType::Splitter), 22, "SPLIT", "B2", "B1", "BUS",
                            true, true, true);
     fillGateTileWithLabels(pixels, texW, gMergerTopTile, base(BlockType::Merger), 23, "MERGE", "B2", "B1", "BUS");
+    fillGateTileWithLabels(pixels, texW, gSuperSplitterTopTile, base(BlockType::SuperSplitter), 24, "SUPER", "IN",
+                           "MAP", "OUT", false, true, true);
     fillGateTileWithLabels(pixels, texW, gDecoderTopTile, base(BlockType::Decoder), 24, "DEC", "EN", "SEL", "OUT");
     fillGateTileWithLabels(pixels, texW, gMuxTopTile, base(BlockType::Multiplexer), 26, "MUX", "OUT", "SEL", "");
 
@@ -985,6 +1016,8 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             return gSplitterTopTile;
                         if (b == BlockType::Merger)
                             return gMergerTopTile;
+                        if (b == BlockType::SuperSplitter)
+                            return gSuperSplitterTopTile;
                         if (b == BlockType::Decoder)
                             return gDecoderTopTile;
                         if (b == BlockType::Multiplexer)
@@ -1070,6 +1103,13 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                                 return true; // inputs
                             if (dz == -1)
                                 return true; // BUS side (+Z face of merger)
+                            return false;
+                        }
+                        if (nb == BlockType::SuperSplitter)
+                        {
+                            // BUS in on -Z, BUS out on +Z
+                            if (dz == 1 || dz == -1)
+                                return true;
                             return false;
                         }
                         if (nb == BlockType::Decoder)

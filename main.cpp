@@ -1179,6 +1179,92 @@ void drawSplitterEditBox(int winW, int winH, bool isMerger, const std::string &w
                  0.85f, 0.85f, 0.85f, 1.0f);
 }
 
+void drawSuperSplitterEditBox(int winW, int winH, const std::string &inText, const std::string &outText,
+                              const std::array<uint8_t, 8> &map, int selectedBit, int focus)
+{
+    float boxW = 540.0f;
+    float boxH = 380.0f;
+    float x = (winW - boxW) * 0.5f;
+    float y = (winH - boxH) * 0.5f;
+    drawQuad(x - 8.0f, y - 8.0f, boxW + 16.0f, boxH + 16.0f, 0.0f, 0.0f, 0.0f, 0.4f);
+    drawQuad(x, y, boxW, boxH, 0.05f, 0.05f, 0.06f, 0.95f);
+    drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.18f, 2.0f);
+
+    auto parseWidth = [](const std::string &txt, int defVal) -> int
+    {
+        if (txt.empty())
+            return defVal;
+        try
+        {
+            int v = std::stoi(txt);
+            return std::clamp(v, 1, 8);
+        }
+        catch (...)
+        {
+            return defVal;
+        }
+    };
+    int inW = parseWidth(inText, 8);
+    int outW = parseWidth(outText, 4);
+    selectedBit = std::clamp(selectedBit, 0, 7);
+
+    float textX = x + 18.0f;
+    float textY = y + 18.0f;
+    drawTextTiny(textX, textY, 2.2f, "Super Splitter", 0.95f, 0.98f, 1.0f, 1.0f);
+    const char *focusLabel = (focus == 0) ? "Edition: bits d'entree" : (focus == 1) ? "Edition: bits de sortie"
+                                                                                    : "Edition: mapping";
+    drawTextTiny(textX, textY + 24.0f, 1.4f, focusLabel, 0.85f, 0.9f, 0.95f, 1.0f);
+
+    auto drawField = [&](float fx, float fy, const std::string &label, const std::string &val, bool active)
+    {
+        float bgR = active ? 0.18f : 0.12f;
+        float bgG = active ? 0.22f : 0.12f;
+        float bgB = active ? 0.32f : 0.12f;
+        drawTextTiny(fx, fy, 1.8f, label.c_str(), 1.0f, 0.96f, 0.9f, 1.0f);
+        drawQuad(fx, fy + 18.0f, 180.0f, 36.0f, bgR, bgG, bgB, 0.9f);
+        drawOutline(fx, fy + 18.0f, 180.0f, 36.0f, 1.0f, 1.0f, 1.0f, active ? 0.35f : 0.2f, 2.0f);
+        drawTextTiny(fx + 10.0f, fy + 26.0f, 2.0f, val.empty() ? " " : val, 1.0f, 1.0f, 1.0f, 1.0f);
+    };
+
+    drawField(textX, textY + 52.0f, "Bits d'entree (1-8)", inText.empty() ? "8" : inText, focus == 0);
+    drawField(textX + 210.0f, textY + 52.0f, "Bits de sortie (1-8)", outText.empty() ? "4" : outText, focus == 1);
+
+    float mapAreaY = y + 130.0f;
+    drawTextTiny(textX, mapAreaY - 18.0f, 1.6f, "Mapping sortie -> entree", 0.95f, 0.95f, 0.95f, 1.0f);
+    float cellW = 120.0f;
+    float cellH = 48.0f;
+    for (int i = 0; i < 8; ++i)
+    {
+        int row = i / 4;
+        int col = i % 4;
+        float cx = x + 18.0f + col * (cellW + 8.0f);
+        float cy = mapAreaY + row * (cellH + 10.0f);
+        bool enabled = i < outW;
+        bool highlight = (focus == 2 && i == selectedBit);
+        float bgR = enabled ? 0.18f : 0.08f;
+        float bgG = enabled ? 0.26f : 0.08f;
+        float bgB = enabled ? 0.35f : 0.08f;
+        if (highlight)
+        {
+            bgR += 0.08f;
+            bgG += 0.1f;
+            bgB += 0.12f;
+        }
+        drawQuad(cx, cy, cellW, cellH, bgR, bgG, bgB, 0.92f);
+        drawOutline(cx, cy, cellW, cellH, 1.0f, 1.0f, 1.0f, highlight ? 0.6f : 0.25f, 2.0f);
+        std::string outLabel = "OUT " + std::to_string(i);
+        std::string inLabel = "IN " + std::to_string(map[i]);
+        drawTextTiny(cx + 8.0f, cy + 8.0f, 1.4f, outLabel.c_str(), 1.0f, 1.0f, 1.0f, enabled ? 1.0f : 0.6f);
+        drawTextTiny(cx + 8.0f, cy + 26.0f, 1.8f, inLabel.c_str(), 1.0f, 0.98f, 0.9f, enabled ? 1.0f : 0.6f);
+        if (!enabled)
+            drawTextTiny(cx + cellW - 70.0f, cy + 26.0f, 1.1f, "(hors plage)", 0.8f, 0.8f, 0.8f, 0.5f);
+    }
+
+    drawTextTiny(textX, y + boxH - 46.0f, 1.4f, "Tab change de champ. Fleches selectionnent la sortie. Chiffres 0-7 fixent l'entree.",
+                 0.9f, 0.9f, 0.9f, 1.0f);
+    drawTextTiny(textX, y + boxH - 26.0f, 1.4f, "Entrer pour valider, Esc pour annuler", 0.9f, 0.9f, 0.9f, 1.0f);
+}
+
 // ---------- Config ----------
 static const char *CONFIG_FILE = "config.cfg";
 
@@ -1239,7 +1325,7 @@ static const char *MAPS_DIR = "maps";
 struct SaveHeader
 {
     char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
-    uint32_t version = 9;
+    uint32_t version = 11;
     uint32_t w = 0, h = 0, d = 0;
     uint32_t seed = 0;
 };
@@ -1269,6 +1355,9 @@ bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
         uint8_t btnWidth = world.getButtonWidth(x, y, z);
         uint8_t splitWidth = world.getSplitterWidth(x, y, z);
         uint8_t splitOrder = world.getSplitterOrder(x, y, z);
+        uint8_t superIn = world.getSuperInWidth(x, y, z);
+        uint8_t superOut = world.getSuperOutWidth(x, y, z);
+        const auto &superMap = world.getSuperMap(x, y, z);
         out.write(reinterpret_cast<const char *>(&b), 1);
         out.write(reinterpret_cast<const char *>(&p), 1);
         out.write(reinterpret_cast<const char *>(&btn), 1);
@@ -1276,6 +1365,9 @@ bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
         out.write(reinterpret_cast<const char *>(&btnWidth), 1);
         out.write(reinterpret_cast<const char *>(&splitWidth), 1);
         out.write(reinterpret_cast<const char *>(&splitOrder), 1);
+        out.write(reinterpret_cast<const char *>(&superIn), 1);
+        out.write(reinterpret_cast<const char *>(&superOut), 1);
+        out.write(reinterpret_cast<const char *>(superMap.data()), static_cast<std::streamsize>(superMap.size()));
     }
 
     // Save sign texts (only for version >= 2)
@@ -1318,7 +1410,8 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
         return false;
     if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3 && hdr.version != 4 && hdr.version != 5 &&
-        hdr.version != 6 && hdr.version != 7 && hdr.version != 8 && hdr.version != 9)
+        hdr.version != 6 && hdr.version != 7 && hdr.version != 8 && hdr.version != 9 && hdr.version != 10 &&
+        hdr.version != 11)
         return false;
     if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
         hdr.d != static_cast<uint32_t>(world.getDepth()))
@@ -1331,6 +1424,11 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
         uint8_t btnWidth = 0;
         uint8_t splitWidth = 1;
         uint8_t splitOrder = 0;
+        uint8_t superIn = 8;
+        uint8_t superOut = 4;
+        std::array<uint8_t, 8> superMap{};
+        for (uint8_t bit = 0; bit < 8; ++bit)
+            superMap[bit] = bit;
         in.read(reinterpret_cast<char *>(&b), 1);
         in.read(reinterpret_cast<char *>(&p), 1);
         in.read(reinterpret_cast<char *>(&btn), 1);
@@ -1345,6 +1443,12 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
         }
         else if (b == static_cast<uint8_t>(BlockType::Button))
             btnWidth = 8; // legacy saves assume full 8-bit buttons
+        if (hdr.version >= 10)
+        {
+            in.read(reinterpret_cast<char *>(&superIn), 1);
+            in.read(reinterpret_cast<char *>(&superOut), 1);
+            in.read(reinterpret_cast<char *>(superMap.data()), static_cast<std::streamsize>(superMap.size()));
+        }
         if (!in)
             return false;
 
@@ -1364,6 +1468,12 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
                 b = static_cast<uint8_t>(BlockType::Wire);
             else if (b == 16)
                 b = static_cast<uint8_t>(BlockType::Sign);
+        }
+        if (hdr.version == 10)
+        {
+            // Version 10 saves used SuperSplitter at enum value 23 (before Decoder/Mux were inserted)
+            if (b == 23)
+                b = static_cast<uint8_t>(BlockType::SuperSplitter);
         }
 
         int x = i % world.getWidth();
@@ -1392,6 +1502,12 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
             }
             world.setSplitterWidth(x, y, z, splitWidth == 0 ? 1 : splitWidth);
             world.setSplitterOrder(x, y, z, splitOrder);
+        }
+        if (hdr.version >= 10)
+        {
+            world.setSuperInWidth(x, y, z, superIn == 0 ? 8 : superIn);
+            world.setSuperOutWidth(x, y, z, superOut == 0 ? 1 : superOut);
+            world.setSuperMap(x, y, z, superMap);
         }
     }
 
@@ -1495,6 +1611,13 @@ bool gSplitterIsMerger = false;
 int gSplitterX = 0, gSplitterY = 0, gSplitterZ = 0;
 std::string gSplitterWidthBuffer;
 bool gSplitterOrder = false; // false = B1 LSB (split: LSB->B1), true = B1 MSB
+bool gSuperSplitterEditOpen = false;
+int gSuperSplitterX = 0, gSuperSplitterY = 0, gSuperSplitterZ = 0;
+std::string gSuperInBuffer;
+std::string gSuperOutBuffer;
+std::array<uint8_t, 8> gSuperMapBuffer{};
+int gSuperSelectedBit = 0;
+int gSuperFocus = 0; // 0=in width, 1=out width, 2=map
 bool gMainMenuOpen = true;
 bool gSettingsMenuOpen = false;
 Config gConfig;
@@ -1771,12 +1894,17 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
     }
     case BlockType::Splitter:
     case BlockType::Merger:
+    case BlockType::SuperSplitter:
     {
         glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
         glLineWidth(2.0f);
         float pad = slotSize * 0.2f;
         drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
-        const char *label = slot.type == BlockType::Splitter ? "SPL" : "MER";
+        const char *label = "SPL";
+        if (slot.type == BlockType::Merger)
+            label = "MER";
+        else if (slot.type == BlockType::SuperSplitter)
+            label = "SUP";
         float txtSize = 1.6f;
         float textWidth = static_cast<float>(std::strlen(label)) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
         float textX = x + (slotSize - textWidth) * 0.5f;
@@ -2361,7 +2489,8 @@ int main()
         }
 
         // Applique la souris lissée ici pour stabiliser la camera
-        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
+        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen &&
+            !gSuperSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
         {
             const float sensitivity = gConfig.mouseSensitivity;
             player.yaw += smoothDX * sensitivity;
@@ -2420,15 +2549,22 @@ int main()
                         gButtonEditOpen = false;
                         SDL_StopTextInput();
                     }
-                    else if (gSplitterEditOpen)
-                    {
-                        gSplitterEditOpen = false;
-                        SDL_StopTextInput();
-                        SDL_SetRelativeMouseMode(SDL_TRUE);
-                        SDL_ShowCursor(SDL_FALSE);
-                    }
-                    else if (gWireInfoOpen)
-                    {
+                else if (gSplitterEditOpen)
+                {
+                    gSplitterEditOpen = false;
+                    SDL_StopTextInput();
+                    SDL_SetRelativeMouseMode(SDL_TRUE);
+                    SDL_ShowCursor(SDL_FALSE);
+                }
+                else if (gSuperSplitterEditOpen)
+                {
+                    gSuperSplitterEditOpen = false;
+                    SDL_StopTextInput();
+                    SDL_SetRelativeMouseMode(SDL_TRUE);
+                    SDL_ShowCursor(SDL_FALSE);
+                }
+                else if (gWireInfoOpen)
+                {
                         gWireInfoOpen = false;
                         SDL_SetRelativeMouseMode(SDL_TRUE);
                         SDL_ShowCursor(SDL_FALSE);
@@ -2461,7 +2597,8 @@ int main()
                         smoothDX = smoothDY = 0.0f;
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen)
+                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen &&
+                         !gSplitterEditOpen && !gSuperSplitterEditOpen && !gWireInfoOpen)
                 {
                     inventoryOpen = !inventoryOpen;
                     pendingSlot = -1;
@@ -2483,7 +2620,8 @@ int main()
                         SDL_SetWindowFullscreen(window, 0);
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen)
+                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen &&
+                         !gSuperSplitterEditOpen && !gWireInfoOpen)
                 {
                     float spawnX = WIDTH * 0.5f;
                     float spawnZ = DEPTH * 0.5f;
@@ -2509,7 +2647,7 @@ int main()
                     player.y = static_cast<float>(checkY) + 0.2f;
                 }
                 else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_8 && !gSignEditOpen &&
-                         !gButtonEditOpen && !gWireInfoOpen && !gSplitterEditOpen)
+                         !gButtonEditOpen && !gWireInfoOpen && !gSplitterEditOpen && !gSuperSplitterEditOpen)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
                     if (selected >= static_cast<int>(hotbarSlots.size()))
@@ -2532,6 +2670,10 @@ int main()
                 else if (gSplitterEditOpen && e.key.keysym.sym == SDLK_TAB)
                 {
                     gSplitterOrder = !gSplitterOrder;
+                }
+                else if (gSuperSplitterEditOpen && e.key.keysym.sym == SDLK_TAB)
+                {
+                    gSuperFocus = (gSuperFocus + 1) % 3;
                 }
                 else if (saveMenuOpen && e.key.keysym.sym == SDLK_TAB)
                 {
@@ -2566,6 +2708,38 @@ int main()
                 {
                     if (!gSplitterWidthBuffer.empty())
                         gSplitterWidthBuffer.pop_back();
+                }
+                else if (gSuperSplitterEditOpen && e.key.keysym.sym == SDLK_BACKSPACE)
+                {
+                    if (gSuperFocus == 0)
+                    {
+                        if (!gSuperInBuffer.empty())
+                            gSuperInBuffer.pop_back();
+                    }
+                    else if (gSuperFocus == 1)
+                    {
+                        if (!gSuperOutBuffer.empty())
+                            gSuperOutBuffer.pop_back();
+                    }
+                    else
+                    {
+                        gSuperMapBuffer[gSuperSelectedBit] = 0;
+                    }
+                }
+                else if (gSuperSplitterEditOpen &&
+                         (e.key.keysym.sym == SDLK_LEFT || e.key.keysym.sym == SDLK_RIGHT ||
+                          e.key.keysym.sym == SDLK_UP || e.key.keysym.sym == SDLK_DOWN))
+                {
+                    int delta = 0;
+                    if (e.key.keysym.sym == SDLK_LEFT)
+                        delta = -1;
+                    else if (e.key.keysym.sym == SDLK_RIGHT)
+                        delta = 1;
+                    else if (e.key.keysym.sym == SDLK_UP)
+                        delta = -4;
+                    else if (e.key.keysym.sym == SDLK_DOWN)
+                        delta = 4;
+                    gSuperSelectedBit = (gSuperSelectedBit + delta + 8) % 8;
                 }
                 else if (gButtonEditOpen &&
                          (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
@@ -2617,6 +2791,38 @@ int main()
                     SDL_SetRelativeMouseMode(SDL_TRUE);
                     SDL_ShowCursor(SDL_FALSE);
                 }
+                else if (gSuperSplitterEditOpen &&
+                         (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
+                {
+                    auto parseWidth = [](const std::string &txt, int defVal) -> int
+                    {
+                        if (txt.empty())
+                            return defVal;
+                        try
+                        {
+                            return std::clamp(std::stoi(txt), 1, 8);
+                        }
+                        catch (...)
+                        {
+                            return defVal;
+                        }
+                    };
+                    int inW = parseWidth(gSuperInBuffer, 8);
+                    int outW = parseWidth(gSuperOutBuffer, 4);
+                    world.setSuperInWidth(gSuperSplitterX, gSuperSplitterY, gSuperSplitterZ, static_cast<uint8_t>(inW));
+                    world.setSuperOutWidth(gSuperSplitterX, gSuperSplitterY, gSuperSplitterZ, static_cast<uint8_t>(outW));
+                    for (int bit = 0; bit < 8; ++bit)
+                    {
+                        uint8_t src = gSuperMapBuffer[bit];
+                        if (src >= static_cast<uint8_t>(inW))
+                            src = static_cast<uint8_t>(inW > 0 ? inW - 1 : 0);
+                        world.setSuperMapBit(gSuperSplitterX, gSuperSplitterY, gSuperSplitterZ, bit, src);
+                    }
+                    gSuperSplitterEditOpen = false;
+                    SDL_StopTextInput();
+                    SDL_SetRelativeMouseMode(SDL_TRUE);
+                    SDL_ShowCursor(SDL_FALSE);
+                }
                 else if (gButtonEditOpen && e.key.keysym.sym == SDLK_ESCAPE)
                 {
                     gButtonEditOpen = false;
@@ -2629,8 +2835,15 @@ int main()
                     SDL_SetRelativeMouseMode(SDL_TRUE);
                     SDL_ShowCursor(SDL_FALSE);
                 }
-                else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !pauseMenuOpen &&
-                         e.key.keysym.sym == SDLK_SPACE && e.key.repeat == 0)
+                else if (gSuperSplitterEditOpen && e.key.keysym.sym == SDLK_ESCAPE)
+                {
+                    gSuperSplitterEditOpen = false;
+                    SDL_StopTextInput();
+                    SDL_SetRelativeMouseMode(SDL_TRUE);
+                    SDL_ShowCursor(SDL_FALSE);
+                }
+                else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gSuperSplitterEditOpen &&
+                         !gWireInfoOpen && !pauseMenuOpen && e.key.keysym.sym == SDLK_SPACE && e.key.repeat == 0)
                 {
                     if (lastSpaceTap >= 0.0f && (elapsedTime - lastSpaceTap) <= SPRINT_DOUBLE_TAP)
                     {
@@ -2640,7 +2853,7 @@ int main()
                     }
                     lastSpaceTap = elapsedTime;
                 }
-                else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen &&
+                else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gSuperSplitterEditOpen && !gWireInfoOpen &&
                          (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
                 {
                     if (lastForwardTap >= 0.0f && (elapsedTime - lastForwardTap) <= SPRINT_DOUBLE_TAP)
@@ -2650,7 +2863,7 @@ int main()
                     lastForwardTap = elapsedTime;
                 }
                 else if (e.key.keysym.sym == SDLK_q && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen &&
-                         !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen)
+                         !gButtonEditOpen && !gSplitterEditOpen && !gSuperSplitterEditOpen && !gWireInfoOpen)
                 {
                     Vec3 fwd = forwardVec(player.yaw, player.pitch);
                     float eyeY = player.y + EYE_HEIGHT;
@@ -2681,6 +2894,21 @@ int main()
                         SDL_SetRelativeMouseMode(SDL_FALSE);
                         SDL_ShowCursor(SDL_TRUE);
                     }
+                    else if (hit.hit && world.get(hit.x, hit.y, hit.z) == BlockType::SuperSplitter)
+                    {
+                        gSuperSplitterEditOpen = true;
+                        gSuperSplitterX = hit.x;
+                        gSuperSplitterY = hit.y;
+                        gSuperSplitterZ = hit.z;
+                        gSuperInBuffer = std::to_string(world.getSuperInWidth(hit.x, hit.y, hit.z));
+                        gSuperOutBuffer = std::to_string(world.getSuperOutWidth(hit.x, hit.y, hit.z));
+                        gSuperMapBuffer = world.getSuperMap(hit.x, hit.y, hit.z);
+                        gSuperSelectedBit = 0;
+                        gSuperFocus = 2;
+                        SDL_StartTextInput();
+                        SDL_SetRelativeMouseMode(SDL_FALSE);
+                        SDL_ShowCursor(SDL_TRUE);
+                    }
                     else if (hit.hit && world.get(hit.x, hit.y, hit.z) == BlockType::Wire)
                     {
                         gWireInfoOpen = true;
@@ -2701,7 +2929,8 @@ int main()
             {
                 mouseX = e.motion.x;
                 mouseY = e.motion.y;
-                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen &&
+                    !gSuperSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
                 {
                     // Filtre de la souris pour lisser les mouvements et limiter les saccades
                     smoothDX = smoothDX * 0.6f + static_cast<float>(e.motion.xrel) * 0.4f;
@@ -2710,9 +2939,10 @@ int main()
             }
             else if (e.type == SDL_MOUSEWHEEL)
             {
-                if (gSplitterEditOpen || gButtonEditOpen || gSignEditOpen || gWireInfoOpen)
+                if (gSplitterEditOpen || gButtonEditOpen || gSignEditOpen || gSuperSplitterEditOpen || gWireInfoOpen)
                     continue;
-                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen &&
+                    !gSuperSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
                 {
                     if (e.wheel.y > 0)
                     {
@@ -2794,6 +3024,31 @@ int main()
                         }
                     }
                 }
+                else if (gSuperSplitterEditOpen)
+                {
+                    const char *txt = e.text.text;
+                    for (int i = 0; txt[i] != '\0'; ++i)
+                    {
+                        char c = txt[i];
+                        if (c >= '0' && c <= '9')
+                        {
+                            if (gSuperFocus == 0)
+                            {
+                                if (gSuperInBuffer.size() < 2)
+                                    gSuperInBuffer.push_back(c);
+                            }
+                            else if (gSuperFocus == 1)
+                            {
+                                if (gSuperOutBuffer.size() < 2)
+                                    gSuperOutBuffer.push_back(c);
+                            }
+                            else if (gSuperFocus == 2 && c <= '7')
+                            {
+                                gSuperMapBuffer[gSuperSelectedBit] = static_cast<uint8_t>(c - '0');
+                            }
+                        }
+                    }
+                }
             }
             else if (e.type == SDL_MOUSEBUTTONDOWN)
             {
@@ -2866,6 +3121,8 @@ int main()
                 if (gSignEditOpen)
                     continue;
                 if (gSplitterEditOpen)
+                    continue;
+                if (gSuperSplitterEditOpen)
                     continue;
                 if (gButtonEditOpen)
                     continue;
@@ -3127,7 +3384,10 @@ int main()
             }
         }
 
-        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen || gMainMenuOpen || gSettingsMenuOpen) ? 0.0f : dt;
+        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gSuperSplitterEditOpen ||
+                       gWireInfoOpen || gMainMenuOpen || gSettingsMenuOpen)
+                          ? 0.0f
+                          : dt;
 
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         // Movement uses a purely horizontal forward vector (independent of pitch)
@@ -3188,7 +3448,8 @@ int main()
                 }
             }
         }
-        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen)
+        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen ||
+            gSuperSplitterEditOpen || gWireInfoOpen)
         {
             sprinting = false;
         }
@@ -3477,6 +3738,9 @@ int main()
         }
         if (gSplitterEditOpen)
             drawSplitterEditBox(winW, winH, gSplitterIsMerger, gSplitterWidthBuffer, gSplitterOrder);
+        if (gSuperSplitterEditOpen)
+            drawSuperSplitterEditBox(winW, winH, gSuperInBuffer, gSuperOutBuffer, gSuperMapBuffer, gSuperSelectedBit,
+                                     gSuperFocus);
         endHud();
 
         SDL_GL_SwapWindow(window);

@@ -1,6 +1,7 @@
 #include "world.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <random>
 
@@ -31,20 +32,21 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Sign, {"Sign", false, {0.85f, 0.7f, 0.45f}}},
     {BlockType::Splitter, {"Splitter", true, {0.2f, 0.75f, 0.7f}}},
     {BlockType::Merger, {"Merger", true, {0.75f, 0.4f, 0.85f}}},
+    {BlockType::SuperSplitter, {"Super Splitter", true, {0.22f, 0.6f, 0.92f}}},
     {BlockType::Decoder, {"Decoder", true, {0.35f, 0.55f, 0.85f}}},
     {BlockType::Multiplexer, {"Mux", true, {0.55f, 0.35f, 0.85f}}},
 };
 
-const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
-                                       BlockType::Stone, BlockType::Glass, BlockType::NotGate,
-                                       BlockType::Splitter, BlockType::Merger};
-const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Grass,     BlockType::Wood,
-                                                  BlockType::Stone, BlockType::Glass,     BlockType::AndGate,
-                                                  BlockType::OrGate, BlockType::NotGate,  BlockType::XorGate,
-                                                  BlockType::DFlipFlop, BlockType::AddGate, BlockType::Counter,
-                                                  BlockType::Led,   BlockType::Button,    BlockType::Wire,
-                                                  BlockType::Sign,  BlockType::Splitter,  BlockType::Merger,
-                                                  BlockType::Decoder, BlockType::Multiplexer};
+const std::vector<BlockType> HOTBAR = {BlockType::Dirt,      BlockType::Grass,      BlockType::Wood,
+                                       BlockType::Stone,     BlockType::Glass,      BlockType::NotGate,
+                                       BlockType::Splitter,  BlockType::Merger,     BlockType::SuperSplitter};
+const std::vector<BlockType> INVENTORY_ALLOWED = {
+    BlockType::Dirt,        BlockType::Grass,       BlockType::Wood,        BlockType::Stone,
+    BlockType::Glass,       BlockType::AndGate,     BlockType::OrGate,      BlockType::NotGate,
+    BlockType::XorGate,     BlockType::DFlipFlop,   BlockType::AddGate,     BlockType::Counter,
+    BlockType::Led,         BlockType::Button,      BlockType::Wire,        BlockType::Sign,
+    BlockType::Splitter,    BlockType::Merger,      BlockType::Decoder,     BlockType::Multiplexer,
+    BlockType::SuperSplitter};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -70,8 +72,13 @@ World::World(int w, int h, int d)
     : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), power(w * h * d, 0),
       powerWidth(w * h * d, 8), buttonState(w * h * d, 0), buttonValue(w * h * d, 0),
       buttonWidth(w * h * d, 0), splitterWidth(w * h * d, 1), splitterOrder(w * h * d, 0),
-      signText(w * h * d)
+      superInWidth(w * h * d, 8), superOutWidth(w * h * d, 4), superMap(w * h * d), signText(w * h * d)
 {
+    for (auto &m : superMap)
+    {
+        for (uint8_t bit = 0; bit < 8; ++bit)
+            m[bit] = bit;
+    }
 }
 
 BlockType World::get(int x, int y, int z) const { return tiles[index(x, y, z)]; }
@@ -82,6 +89,14 @@ void World::set(int x, int y, int z, BlockType b)
     tiles[idx] = b;
     power[idx] = 0;
     powerWidth[idx] = 8;
+    auto resetSuperParams = [&](int i)
+    {
+        superInWidth[i] = 8;
+        superOutWidth[i] = 4;
+        for (uint8_t bit = 0; bit < 8; ++bit)
+            superMap[i][bit] = bit;
+    };
+    resetSuperParams(idx);
     if (b != BlockType::Button)
     {
         buttonState[idx] = 0;
@@ -102,6 +117,13 @@ void World::set(int x, int y, int z, BlockType b)
     {
         splitterWidth[idx] = 1;
         splitterOrder[idx] = 0;
+    }
+    if (b == BlockType::SuperSplitter)
+    {
+        if (superInWidth[idx] == 0 || superInWidth[idx] > 8)
+            superInWidth[idx] = 8;
+        if (superOutWidth[idx] == 0 || superOutWidth[idx] > 8)
+            superOutWidth[idx] = 4;
     }
     if (b != BlockType::Sign)
         signText[idx].clear();
@@ -154,6 +176,52 @@ void World::setSplitterOrder(int x, int y, int z, uint8_t order)
     int i = index(x, y, z);
     splitterOrder[i] = static_cast<uint8_t>(order & 0x1u);
 }
+uint8_t World::getSuperInWidth(int x, int y, int z) const { return superInWidth[index(x, y, z)]; }
+uint8_t World::getSuperOutWidth(int x, int y, int z) const { return superOutWidth[index(x, y, z)]; }
+void World::setSuperInWidth(int x, int y, int z, uint8_t bits)
+{
+    int i = index(x, y, z);
+    superInWidth[i] = static_cast<uint8_t>(std::clamp<int>(bits, 1, 8));
+}
+void World::setSuperOutWidth(int x, int y, int z, uint8_t bits)
+{
+    int i = index(x, y, z);
+    superOutWidth[i] = static_cast<uint8_t>(std::clamp<int>(bits, 1, 8));
+}
+uint8_t World::getSuperMapBit(int x, int y, int z, int outBit) const
+{
+    int idx = index(x, y, z);
+    if (outBit < 0 || outBit >= 8 || idx < 0 || idx >= static_cast<int>(superMap.size()))
+        return 0;
+    return superMap[idx][outBit];
+}
+void World::setSuperMapBit(int x, int y, int z, int outBit, uint8_t srcBit)
+{
+    int idx = index(x, y, z);
+    if (outBit < 0 || outBit >= 8 || idx < 0 || idx >= static_cast<int>(superMap.size()))
+        return;
+    superMap[idx][outBit] = static_cast<uint8_t>(std::clamp<int>(srcBit, 0, 7));
+}
+const std::array<uint8_t, 8> &World::getSuperMap(int x, int y, int z) const
+{
+    static const std::array<uint8_t, 8> empty{};
+    int idx = index(x, y, z);
+    if (idx < 0 || idx >= static_cast<int>(superMap.size()))
+        return empty;
+    return superMap[idx];
+}
+void World::setSuperMap(int x, int y, int z, const std::array<uint8_t, 8> &map)
+{
+    int idx = index(x, y, z);
+    if (idx < 0 || idx >= static_cast<int>(superMap.size()))
+        return;
+    superMap[idx] = map;
+    for (auto &bit : superMap[idx])
+    {
+        if (bit > 7)
+            bit = 7;
+    }
+}
 
 void World::toggleButton(int x, int y, int z)
 {
@@ -187,6 +255,13 @@ void World::generate(unsigned seed)
     std::fill(buttonWidth.begin(), buttonWidth.end(), 0);
     std::fill(splitterWidth.begin(), splitterWidth.end(), 1);
     std::fill(splitterOrder.begin(), splitterOrder.end(), 0);
+    std::fill(superInWidth.begin(), superInWidth.end(), 8);
+    std::fill(superOutWidth.begin(), superOutWidth.end(), 4);
+    for (auto &m : superMap)
+    {
+        for (uint8_t i = 0; i < 8; ++i)
+            m[i] = i;
+    }
     for (int z = 0; z < depth; ++z)
     {
         for (int x = 0; x < width; ++x)
@@ -445,6 +520,8 @@ void updateLogic(World &world)
     queue.reserve(total / 4);
     auto pushWire = [&](int x, int y, int z, uint8_t val, uint8_t width)
     {
+        if (val == 0)
+            return; // avoid infinite propagation of zero-valued buses
         if (!world.inside(x, y, z))
             return;
         int i = idx(x, y, z);
@@ -672,6 +749,48 @@ void updateLogic(World &world)
                         pushWire(x - 1, y, z, out1, w1); // B1 on -X
                     if (out2)
                         pushWire(x + 1, y, z, out2, w2); // B2 on +X
+                    out = 0;
+                    break;
+                }
+                case BlockType::SuperSplitter:
+                {
+                    uint8_t configuredIn = world.getSuperInWidth(x, y, z);
+                    uint8_t configuredOut = world.getSuperOutWidth(x, y, z);
+                    configuredIn = configuredIn == 0 ? 8 : std::clamp<uint8_t>(configuredIn, 1, 8);
+                    configuredOut = configuredOut == 0 ? 1 : std::clamp<uint8_t>(configuredOut, 1, 8);
+
+                    uint8_t incomingW = widthAt(x, y, z - 1);
+                    incomingW = incomingW == 0 ? 8 : std::clamp<uint8_t>(incomingW, 1, 8);
+                    uint8_t effectiveIn = static_cast<uint8_t>(std::min<uint8_t>(configuredIn, incomingW));
+                    effectiveIn = std::clamp<uint8_t>(effectiveIn, 1, 8);
+                    if (effectiveIn == 0)
+                        break;
+                    uint8_t maskIn = effectiveIn >= 8 ? 0xFFu : static_cast<uint8_t>((1u << effectiveIn) - 1u);
+                    uint8_t busVal = powerAt(x, y, z - 1) & maskIn;
+
+                    uint8_t outW = configuredOut;
+                    if (outW == 0)
+                        outW = 1;
+                    uint8_t outVal = 0;
+                    const auto &map = world.getSuperMap(x, y, z);
+                    for (int ob = 0; ob < static_cast<int>(outW); ++ob)
+                    {
+                        uint8_t src = static_cast<uint8_t>(map[ob] % effectiveIn);
+                        uint8_t bit = static_cast<uint8_t>((busVal >> src) & 0x1u);
+                        outVal = static_cast<uint8_t>(outVal | static_cast<uint8_t>(bit << ob));
+                    }
+
+                    int ox = x;
+                    int oy = y;
+                    int oz = z + 1; // BUS out on +Z
+                    if (world.inside(ox, oy, oz))
+                    {
+                        BlockType outB = world.get(ox, oy, oz);
+                        if (outB == BlockType::Wire)
+                            pushWire(ox, oy, oz, outVal, outW);
+                        else
+                            setPower(ox, oy, oz, outVal, outW);
+                    }
                     out = 0;
                     break;
                 }
