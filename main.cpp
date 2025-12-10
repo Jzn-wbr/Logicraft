@@ -3281,7 +3281,7 @@ int main()
                 bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
                                             s.fpsBoxW, s.fpsBoxH);
                 bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY,
-                                               s.vsyncBoxW, s.vsyncBoxH);
+                                              s.vsyncBoxW, s.vsyncBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
@@ -3421,7 +3421,7 @@ int main()
                 bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
                                             s.fpsBoxW, s.fpsBoxH);
                 bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY,
-                                               s.vsyncBoxW, s.vsyncBoxH);
+                                              s.vsyncBoxW, s.vsyncBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
