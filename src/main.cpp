@@ -1163,6 +1163,26 @@ void drawButtonEditBox(int winW, int winH, const std::string &valueText, const s
                  0.85f, 0.85f, 0.85f, 1.0f);
 }
 
+void drawClockEditBox(int winW, int winH, const std::string &freqText)
+{
+    float boxW = 360.0f;
+    float boxH = 190.0f;
+    float x = (winW - boxW) * 0.5f;
+    float y = (winH - boxH) * 0.5f;
+    drawQuad(x - 6.0f, y - 6.0f, boxW + 12.0f, boxH + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f);
+    drawQuad(x, y, boxW, boxH, 0.05f, 0.05f, 0.06f, 0.9f);
+    drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+    float textX = x + 18.0f;
+    float textY = y + 20.0f;
+
+    drawTextTiny(textX, textY, 2.0f, "Frequence clock (1-255)", 1.0f, 0.95f, 0.85f, 1.0f);
+    float boxY = textY + 22.0f;
+    drawQuad(textX, boxY, boxW - 36.0f, 36.0f, 0.12f, 0.12f, 0.14f, 0.85f);
+    drawOutline(textX, boxY, boxW - 36.0f, 36.0f, 1.0f, 1.0f, 1.0f, 0.45f, 2.0f);
+    drawTextTiny(textX + 6.0f, boxY + 10.0f, 2.0f, freqText.empty() ? "0" : freqText, 1.0f, 1.0f, 1.0f, 1.0f);
+    drawTextTiny(textX, textY + 90.0f, 1.5f, "Entrer pour valider, Esc pour annuler", 0.85f, 0.85f, 0.85f, 1.0f);
+}
+
 void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value)
 {
     float boxW = 360.0f;
@@ -1284,7 +1304,7 @@ void saveConfig(const Config &cfg)
 struct SaveHeader
 {
     char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
-    uint32_t version = 9;
+    uint32_t version = 10;
     uint32_t w = 0, h = 0, d = 0;
     uint32_t seed = 0;
 };
@@ -1314,6 +1334,7 @@ bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
         uint8_t btnWidth = world.getButtonWidth(x, y, z);
         uint8_t splitWidth = world.getSplitterWidth(x, y, z);
         uint8_t splitOrder = world.getSplitterOrder(x, y, z);
+        uint8_t clkFreq = world.getClockFreq(x, y, z);
         out.write(reinterpret_cast<const char *>(&b), 1);
         out.write(reinterpret_cast<const char *>(&p), 1);
         out.write(reinterpret_cast<const char *>(&btn), 1);
@@ -1321,6 +1342,7 @@ bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
         out.write(reinterpret_cast<const char *>(&btnWidth), 1);
         out.write(reinterpret_cast<const char *>(&splitWidth), 1);
         out.write(reinterpret_cast<const char *>(&splitOrder), 1);
+        out.write(reinterpret_cast<const char *>(&clkFreq), 1);
     }
 
     // Save sign texts (only for version >= 2)
@@ -1363,7 +1385,7 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
     if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
         return false;
     if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3 && hdr.version != 4 && hdr.version != 5 &&
-        hdr.version != 6 && hdr.version != 7 && hdr.version != 8 && hdr.version != 9)
+        hdr.version != 6 && hdr.version != 7 && hdr.version != 8 && hdr.version != 9 && hdr.version != 10)
         return false;
     if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
         hdr.d != static_cast<uint32_t>(world.getDepth()))
@@ -1376,6 +1398,7 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
         uint8_t btnWidth = 0;
         uint8_t splitWidth = 1;
         uint8_t splitOrder = 0;
+        uint8_t clkFreq = 60;
         in.read(reinterpret_cast<char *>(&b), 1);
         in.read(reinterpret_cast<char *>(&p), 1);
         in.read(reinterpret_cast<char *>(&btn), 1);
@@ -1387,6 +1410,10 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
         {
             in.read(reinterpret_cast<char *>(&splitWidth), 1);
             in.read(reinterpret_cast<char *>(&splitOrder), 1);
+        }
+        if (hdr.version >= 10)
+        {
+            in.read(reinterpret_cast<char *>(&clkFreq), 1);
         }
         else if (b == static_cast<uint8_t>(BlockType::Button))
             btnWidth = 8; // legacy saves assume full 8-bit buttons
@@ -1437,6 +1464,12 @@ bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
             }
             world.setSplitterWidth(x, y, z, splitWidth == 0 ? 1 : splitWidth);
             world.setSplitterOrder(x, y, z, splitOrder);
+        }
+        if (b == static_cast<uint8_t>(BlockType::Clock))
+        {
+            if (hdr.version < 10)
+                clkFreq = 60;
+            world.setClockFreq(x, y, z, clkFreq == 0 ? 1 : clkFreq);
         }
     }
 
@@ -1531,6 +1564,9 @@ int gButtonEditX = 0, gButtonEditY = 0, gButtonEditZ = 0;
 std::string gButtonEditBuffer;
 std::string gButtonWidthBuffer;
 bool gButtonEditingWidth = false;
+bool gClockEditOpen = false;
+int gClockEditX = 0, gClockEditY = 0, gClockEditZ = 0;
+std::string gClockEditBuffer;
 bool gWireInfoOpen = false;
 int gWireInfoX = 0, gWireInfoY = 0, gWireInfoZ = 0;
 uint8_t gWireInfoWidth = 0;
@@ -1858,6 +1894,20 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         float textX = x + (slotSize - textWidth) * 0.5f;
         float textY = y + slotSize * 0.38f;
         drawTextTiny(textX, textY, txtSize, "CMP", 1.0f, 1.0f, 1.0f, 1.0f);
+        glLineWidth(1.0f);
+        break;
+    }
+    case BlockType::Clock:
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 0.92f);
+        glLineWidth(2.0f);
+        float pad = slotSize * 0.2f;
+        drawOutline(x + pad, y + pad, slotSize - pad * 2, slotSize - pad * 2, 1.0f, 1.0f, 1.0f, 0.9f, 2.0f);
+        float txtSize = 1.5f;
+        float textWidth = static_cast<float>(std::strlen("CLK")) * (4.0f * txtSize + txtSize * 0.8f) - txtSize * 0.8f;
+        float textX = x + (slotSize - textWidth) * 0.5f;
+        float textY = y + slotSize * 0.38f;
+        drawTextTiny(textX, textY, txtSize, "CLK", 1.0f, 1.0f, 1.0f, 1.0f);
         glLineWidth(1.0f);
         break;
     }
@@ -2430,7 +2480,7 @@ int main(int argc, char **argv)
         }
 
         // Applique la souris lissée ici pour stabiliser la camera
-        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
+        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !gMainMenuOpen && !gSettingsMenuOpen)
         {
             const float sensitivity = gConfig.mouseSensitivity;
             player.yaw += smoothDX * sensitivity;
@@ -2496,6 +2546,13 @@ int main(int argc, char **argv)
                         SDL_SetRelativeMouseMode(SDL_TRUE);
                         SDL_ShowCursor(SDL_FALSE);
                     }
+                    else if (gClockEditOpen)
+                    {
+                        gClockEditOpen = false;
+                        SDL_StopTextInput();
+                        SDL_SetRelativeMouseMode(SDL_TRUE);
+                        SDL_ShowCursor(SDL_FALSE);
+                    }
                     else if (gWireInfoOpen)
                     {
                         gWireInfoOpen = false;
@@ -2530,7 +2587,7 @@ int main(int argc, char **argv)
                         smoothDX = smoothDY = 0.0f;
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen)
+                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen)
                 {
                     inventoryOpen = !inventoryOpen;
                     pendingSlot = -1;
@@ -2552,7 +2609,7 @@ int main(int argc, char **argv)
                         SDL_SetWindowFullscreen(window, 0);
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen)
+                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen)
                 {
                     float spawnX = WIDTH * 0.5f;
                     float spawnZ = DEPTH * 0.5f;
@@ -2578,7 +2635,7 @@ int main(int argc, char **argv)
                     player.y = static_cast<float>(checkY) + 0.2f;
                 }
                 else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_8 && !gSignEditOpen &&
-                         !gButtonEditOpen && !gWireInfoOpen && !gSplitterEditOpen)
+                         !gButtonEditOpen && !gWireInfoOpen && !gSplitterEditOpen && !gClockEditOpen)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
                     if (selected >= static_cast<int>(hotbarSlots.size()))
@@ -2636,6 +2693,11 @@ int main(int argc, char **argv)
                     if (!gSplitterWidthBuffer.empty())
                         gSplitterWidthBuffer.pop_back();
                 }
+                else if (gClockEditOpen && e.key.keysym.sym == SDLK_BACKSPACE)
+                {
+                    if (!gClockEditBuffer.empty())
+                        gClockEditBuffer.pop_back();
+                }
                 else if (gButtonEditOpen &&
                          (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
                 {
@@ -2686,6 +2748,25 @@ int main(int argc, char **argv)
                     SDL_SetRelativeMouseMode(SDL_TRUE);
                     SDL_ShowCursor(SDL_FALSE);
                 }
+                else if (gClockEditOpen &&
+                         (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
+                {
+                    int freq = 1;
+                    try
+                    {
+                        freq = std::stoi(gClockEditBuffer.empty() ? "1" : gClockEditBuffer);
+                    }
+                    catch (...)
+                    {
+                        freq = 1;
+                    }
+                    freq = std::clamp(freq, 1, 255);
+                    world.setClockFreq(gClockEditX, gClockEditY, gClockEditZ, static_cast<uint8_t>(freq));
+                    gClockEditOpen = false;
+                    SDL_StopTextInput();
+                    SDL_SetRelativeMouseMode(SDL_TRUE);
+                    SDL_ShowCursor(SDL_FALSE);
+                }
                 else if (gButtonEditOpen && e.key.keysym.sym == SDLK_ESCAPE)
                 {
                     gButtonEditOpen = false;
@@ -2698,7 +2779,14 @@ int main(int argc, char **argv)
                     SDL_SetRelativeMouseMode(SDL_TRUE);
                     SDL_ShowCursor(SDL_FALSE);
                 }
-                else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !pauseMenuOpen &&
+                else if (gClockEditOpen && e.key.keysym.sym == SDLK_ESCAPE)
+                {
+                    gClockEditOpen = false;
+                    SDL_StopTextInput();
+                    SDL_SetRelativeMouseMode(SDL_TRUE);
+                    SDL_ShowCursor(SDL_FALSE);
+                }
+                else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !pauseMenuOpen &&
                          e.key.keysym.sym == SDLK_SPACE && e.key.repeat == 0)
                 {
                     if (lastSpaceTap >= 0.0f && (elapsedTime - lastSpaceTap) <= SPRINT_DOUBLE_TAP)
@@ -2709,7 +2797,7 @@ int main(int argc, char **argv)
                     }
                     lastSpaceTap = elapsedTime;
                 }
-                else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen &&
+                else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen &&
                          (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
                 {
                     if (lastForwardTap >= 0.0f && (elapsedTime - lastForwardTap) <= SPRINT_DOUBLE_TAP)
@@ -2719,7 +2807,7 @@ int main(int argc, char **argv)
                     lastForwardTap = elapsedTime;
                 }
                 else if (e.key.keysym.sym == SDLK_q && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen &&
-                         !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen)
+                         !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen)
                 {
                     Vec3 fwd = forwardVec(player.yaw, player.pitch);
                     float eyeY = player.y + EYE_HEIGHT;
@@ -2764,13 +2852,24 @@ int main(int argc, char **argv)
                         SDL_SetRelativeMouseMode(SDL_FALSE);
                         SDL_ShowCursor(SDL_TRUE);
                     }
+                    else if (hit.hit && world.get(hit.x, hit.y, hit.z) == BlockType::Clock)
+                    {
+                        gClockEditOpen = true;
+                        gClockEditX = hit.x;
+                        gClockEditY = hit.y;
+                        gClockEditZ = hit.z;
+                        gClockEditBuffer = std::to_string(world.getClockFreq(hit.x, hit.y, hit.z));
+                        SDL_StartTextInput();
+                        SDL_SetRelativeMouseMode(SDL_FALSE);
+                        SDL_ShowCursor(SDL_TRUE);
+                    }
                 }
             }
             else if (e.type == SDL_MOUSEMOTION)
             {
                 mouseX = e.motion.x;
                 mouseY = e.motion.y;
-                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !gMainMenuOpen && !gSettingsMenuOpen)
                 {
                     // Filtre de la souris pour lisser les mouvements et limiter les saccades
                     smoothDX = smoothDX * 0.6f + static_cast<float>(e.motion.xrel) * 0.4f;
@@ -2779,9 +2878,9 @@ int main(int argc, char **argv)
             }
             else if (e.type == SDL_MOUSEWHEEL)
             {
-                if (gSplitterEditOpen || gButtonEditOpen || gSignEditOpen || gWireInfoOpen)
+                if (gSplitterEditOpen || gButtonEditOpen || gSignEditOpen || gWireInfoOpen || gClockEditOpen)
                     continue;
-                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gMainMenuOpen && !gSettingsMenuOpen)
+                if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !gMainMenuOpen && !gSettingsMenuOpen)
                 {
                     if (e.wheel.y > 0)
                     {
@@ -2863,6 +2962,19 @@ int main(int argc, char **argv)
                         }
                     }
                 }
+                else if (gClockEditOpen)
+                {
+                    const char *txt = e.text.text;
+                    for (int i = 0; txt[i] != '\0'; ++i)
+                    {
+                        char c = txt[i];
+                        if (c >= '0' && c <= '9')
+                        {
+                            if (gClockEditBuffer.size() < 3)
+                                gClockEditBuffer.push_back(c);
+                        }
+                    }
+                }
             }
             else if (e.type == SDL_MOUSEBUTTONDOWN)
             {
@@ -2939,6 +3051,8 @@ int main(int argc, char **argv)
                 if (gButtonEditOpen)
                     continue;
                 if (gButtonEditOpen)
+                    continue;
+                if (gClockEditOpen)
                     continue;
                 if (pauseMenuOpen)
                 {
@@ -3196,7 +3310,7 @@ int main(int argc, char **argv)
             }
         }
 
-        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen || gMainMenuOpen || gSettingsMenuOpen) ? 0.0f : dt;
+        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen || gClockEditOpen || gMainMenuOpen || gSettingsMenuOpen) ? 0.0f : dt;
 
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         // Movement uses a purely horizontal forward vector (independent of pitch)
@@ -3257,7 +3371,7 @@ int main(int argc, char **argv)
                 }
             }
         }
-        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen)
+        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen || gClockEditOpen)
         {
             sprinting = false;
         }
@@ -3532,6 +3646,8 @@ int main(int argc, char **argv)
             drawSignEditBox(winW, winH, gSignEditBuffer);
         if (gButtonEditOpen)
             drawButtonEditBox(winW, winH, gButtonEditBuffer, gButtonWidthBuffer, gButtonEditingWidth);
+        if (gClockEditOpen)
+            drawClockEditBox(winW, winH, gClockEditBuffer);
         if (gWireInfoOpen)
         {
             if (world.inside(gWireInfoX, gWireInfoY, gWireInfoZ))

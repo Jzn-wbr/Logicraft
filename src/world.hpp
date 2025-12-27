@@ -34,6 +34,8 @@ public:
     void setSplitterWidth(int x, int y, int z, uint8_t bits);
     uint8_t getSplitterOrder(int x, int y, int z) const;
     void setSplitterOrder(int x, int y, int z, uint8_t order);
+    uint8_t getClockFreq(int x, int y, int z) const;
+    void setClockFreq(int x, int y, int z, uint8_t freq);
     void toggleButton(int x, int y, int z);
     int index(int x, int y, int z) const;
     int totalSize() const;
@@ -60,6 +62,7 @@ private:
     std::vector<uint8_t> buttonWidth;
     std::vector<uint8_t> splitterWidth;
     std::vector<uint8_t> splitterOrder;
+    std::vector<uint8_t> clockFreq;
     std::vector<std::string> signText;
 };
 

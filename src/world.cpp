@@ -34,6 +34,7 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Decoder, {"Decoder", true, {0.35f, 0.55f, 0.85f}}},
     {BlockType::Multiplexer, {"Mux", true, {0.55f, 0.35f, 0.85f}}},
     {BlockType::Comparator, {"Comparator", true, {0.25f, 0.52f, 0.86f}}},
+    {BlockType::Clock, {"CLK", true, {0.9f, 0.82f, 0.25f}}},
 };
 
 const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
@@ -45,7 +46,8 @@ const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Gr
                                                   BlockType::DFlipFlop, BlockType::AddGate, BlockType::Counter,
                                                   BlockType::Led,   BlockType::Button,    BlockType::Wire,
                                                   BlockType::Sign,  BlockType::Splitter,  BlockType::Merger,
-                                                  BlockType::Decoder, BlockType::Multiplexer, BlockType::Comparator};
+                                                  BlockType::Decoder, BlockType::Multiplexer, BlockType::Comparator,
+                                                  BlockType::Clock};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -71,7 +73,7 @@ World::World(int w, int h, int d)
     : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), power(w * h * d, 0),
       powerWidth(w * h * d, 8), buttonState(w * h * d, 0), buttonValue(w * h * d, 0),
       buttonWidth(w * h * d, 0), splitterWidth(w * h * d, 1), splitterOrder(w * h * d, 0),
-      signText(w * h * d)
+      clockFreq(w * h * d, 0), signText(w * h * d)
 {
 }
 
@@ -103,6 +105,14 @@ void World::set(int x, int y, int z, BlockType b)
     {
         splitterWidth[idx] = 1;
         splitterOrder[idx] = 0;
+    }
+    if (b != BlockType::Clock)
+    {
+        clockFreq[idx] = 0;
+    }
+    else
+    {
+        clockFreq[idx] = 60; // default frequency
     }
     if (b != BlockType::Sign)
         signText[idx].clear();
@@ -154,6 +164,14 @@ void World::setSplitterOrder(int x, int y, int z, uint8_t order)
 {
     int i = index(x, y, z);
     splitterOrder[i] = static_cast<uint8_t>(order & 0x1u);
+}
+
+uint8_t World::getClockFreq(int x, int y, int z) const { return clockFreq[index(x, y, z)]; }
+void World::setClockFreq(int x, int y, int z, uint8_t freq)
+{
+    int i = index(x, y, z);
+    uint8_t clamped = static_cast<uint8_t>(std::clamp<int>(freq, 1, 255));
+    clockFreq[i] = clamped;
 }
 
 void World::toggleButton(int x, int y, int z)
@@ -381,6 +399,8 @@ HitInfo raycast(const World &world, float ox, float oy, float oz, float dx, floa
 
 void updateLogic(World &world)
 {
+    static uint64_t clockTick = 0;
+    ++clockTick;
     int total = world.totalSize();
     std::vector<uint8_t> next(total, 0);
     std::vector<uint8_t> nextWidth(total, 8);
@@ -776,6 +796,25 @@ void updateLogic(World &world)
                     out = 0;
                     break;
                 }
+                case BlockType::Clock:
+                {
+                    uint8_t freq = world.getClockFreq(x, y, z);
+                    if (freq == 0)
+                        freq = 1;
+                    uint16_t halfPeriod = static_cast<uint16_t>(256 - freq);
+                    if (halfPeriod == 0)
+                        halfPeriod = 1;
+                    uint16_t period = static_cast<uint16_t>(halfPeriod * 2);
+                    bool high = (clockTick % period) < halfPeriod;
+                    if (high)
+                    {
+                        gateOutputs.push_back({x, y, z});
+                        gateOutVal.push_back(1u);
+                        gateOutWidth.push_back(1u);
+                    }
+                    out = 0;
+                    break;
+                }
                 case BlockType::Comparator:
                 {
                     uint8_t wA = widthAt(x - 1, y, z);
@@ -788,13 +827,15 @@ void updateLogic(World &world)
                                           bLeft == BlockType::DFlipFlop || bLeft == BlockType::AddGate ||
                                           bLeft == BlockType::Counter || bLeft == BlockType::Splitter ||
                                           bLeft == BlockType::Merger || bLeft == BlockType::Decoder ||
-                                          bLeft == BlockType::Multiplexer || bLeft == BlockType::Comparator);
+                                          bLeft == BlockType::Multiplexer || bLeft == BlockType::Comparator ||
+                                          bLeft == BlockType::Clock);
                     bool rightConnected =
                         (bRight == BlockType::Wire || bRight == BlockType::Button || bRight == BlockType::Led ||
                          bRight == BlockType::AndGate || bRight == BlockType::OrGate || bRight == BlockType::XorGate ||
                          bRight == BlockType::NotGate || bRight == BlockType::DFlipFlop || bRight == BlockType::AddGate ||
                          bRight == BlockType::Counter || bRight == BlockType::Splitter || bRight == BlockType::Merger ||
-                         bRight == BlockType::Decoder || bRight == BlockType::Multiplexer || bRight == BlockType::Comparator);
+                         bRight == BlockType::Decoder || bRight == BlockType::Multiplexer || bRight == BlockType::Comparator ||
+                         bRight == BlockType::Clock);
                     if (!leftConnected && !rightConnected)
                     {
                         out = 0;

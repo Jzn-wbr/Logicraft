@@ -38,6 +38,7 @@ int gComparatorInRightTile = 0;
 int gComparatorGtTile = 0;
 int gComparatorEqTile = 0;
 int gComparatorLtTile = 0;
+int gClockTopTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 7;
 const int INV_ROWS = 4;
@@ -701,7 +702,8 @@ void createAtlasTexture()
                   {BlockType::Merger, 22},
                   {BlockType::Decoder, 23},
                   {BlockType::Multiplexer, 24},
-                  {BlockType::Comparator, 25}};
+                  {BlockType::Comparator, 25},
+                  {BlockType::Clock, 26}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
     gAndTopTile = nextTile++;
@@ -727,6 +729,7 @@ void createAtlasTexture()
     gComparatorGtTile = nextTile++;
     gComparatorEqTile = nextTile++;
     gComparatorLtTile = nextTile++;
+    gClockTopTile = nextTile++;
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
     int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
@@ -750,6 +753,7 @@ void createAtlasTexture()
                                    std::max(gComparatorInRightTile,
                                             std::max(gComparatorGtTile,
                                                      std::max(gComparatorEqTile, gComparatorLtTile)))));
+    maxTileIdx = std::max(maxTileIdx, gClockTopTile);
     if (maxTileIdx >= atlasCapacity)
     {
         std::cerr << "Atlas capacity too small for gate labels.\n";
@@ -785,6 +789,7 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Merger], base(BlockType::Merger), 23);
     fillTile(pixels, texW, gBlockTile[BlockType::Decoder], base(BlockType::Decoder), 24);
     fillTile(pixels, texW, gBlockTile[BlockType::Multiplexer], base(BlockType::Multiplexer), 26);
+    fillTile(pixels, texW, gBlockTile[BlockType::Clock], base(BlockType::Clock), 34);
     // Comparator inventory tile styled like other gates with clear label
     fillGateTileWithLabels(pixels, texW, gBlockTile[BlockType::Comparator], base(BlockType::Comparator), 31, "CMP", "A",
                            "B", "OUT");
@@ -824,6 +829,7 @@ void createAtlasTexture()
     fillComparatorLabel(gComparatorGtTile, ">.");
     fillComparatorLabel(gComparatorEqTile, "=");
     fillComparatorLabel(gComparatorLtTile, "<.");
+    fillGateTileWithLabels(pixels, texW, gClockTopTile, base(BlockType::Clock), 35, "CLK", "", "", "OUT");
 
     if (gAtlasTex == 0)
     {
@@ -1048,6 +1054,8 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             return gDecoderTopTile;
                         if (b == BlockType::Comparator)
                             return gComparatorTopTile;
+                        if (b == BlockType::Clock)
+                            return gClockTopTile;
                         if (b == BlockType::Multiplexer)
                             return gMuxTopTile;
                     }
@@ -1163,6 +1171,11 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             if (dy == -1 || dy == 1)
                                 return true;
                             return false;
+                        }
+                        if (nb == BlockType::Clock)
+                        {
+                            // Output on +Z only
+                            return dz == -1;
                         }
                         if (nb == BlockType::Comparator)
                         {

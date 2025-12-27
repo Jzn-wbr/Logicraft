@@ -41,7 +41,8 @@ enum class BlockType
     Merger,
     Decoder,
     Multiplexer,
-    Comparator
+    Comparator,
+    Clock
 };
 
 struct BlockInfo
