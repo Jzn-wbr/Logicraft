@@ -40,7 +40,8 @@ enum class BlockType
     Splitter,
     Merger,
     Decoder,
-    Multiplexer
+    Multiplexer,
+    Comparator
 };
 
 struct BlockInfo

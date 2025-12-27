@@ -33,6 +33,7 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Merger, {"Merger", true, {0.75f, 0.4f, 0.85f}}},
     {BlockType::Decoder, {"Decoder", true, {0.35f, 0.55f, 0.85f}}},
     {BlockType::Multiplexer, {"Mux", true, {0.55f, 0.35f, 0.85f}}},
+    {BlockType::Comparator, {"Comparator", true, {0.25f, 0.52f, 0.86f}}},
 };
 
 const std::vector<BlockType> HOTBAR = {BlockType::Dirt, BlockType::Grass, BlockType::Wood,
@@ -44,7 +45,7 @@ const std::vector<BlockType> INVENTORY_ALLOWED = {BlockType::Dirt, BlockType::Gr
                                                   BlockType::DFlipFlop, BlockType::AddGate, BlockType::Counter,
                                                   BlockType::Led,   BlockType::Button,    BlockType::Wire,
                                                   BlockType::Sign,  BlockType::Splitter,  BlockType::Merger,
-                                                  BlockType::Decoder, BlockType::Multiplexer};
+                                                  BlockType::Decoder, BlockType::Multiplexer, BlockType::Comparator};
 
 bool isSolid(BlockType b) { return BLOCKS.at(b).solid; }
 
@@ -388,14 +389,23 @@ void updateLogic(World &world)
     std::vector<std::array<int, 3>> notOutputs;
     std::vector<std::array<int, 3>> addSumOutputs;
     std::vector<std::array<int, 3>> addCoutOutputs;
+    std::vector<std::array<int, 3>> compGtOutputs;
+    std::vector<std::array<int, 3>> compEqOutputs;
+    std::vector<std::array<int, 3>> compLtOutputs;
     std::vector<uint8_t> gateOutVal;
     std::vector<uint8_t> gateOutWidth;
     std::vector<uint8_t> notOutVal;
     std::vector<uint8_t> addSumVal;
     std::vector<uint8_t> addCoutVal;
+    std::vector<uint8_t> compGtVal;
+    std::vector<uint8_t> compEqVal;
+    std::vector<uint8_t> compLtVal;
     std::vector<uint8_t> notOutWidth;
     std::vector<uint8_t> addSumWidth;
     std::vector<uint8_t> addCoutWidth;
+    std::vector<uint8_t> compGtWidth;
+    std::vector<uint8_t> compEqWidth;
+    std::vector<uint8_t> compLtWidth;
     std::vector<int> dffIndices;
     std::vector<uint8_t> dffNextClk(total, 0);
     gateOutputs.reserve(total / 16);
@@ -407,9 +417,15 @@ void updateLogic(World &world)
     notOutVal.reserve(total / 16);
     addSumVal.reserve(total / 16);
     addCoutVal.reserve(total / 16);
+    compGtVal.reserve(total / 16);
+    compEqVal.reserve(total / 16);
+    compLtVal.reserve(total / 16);
     notOutWidth.reserve(total / 16);
     addSumWidth.reserve(total / 16);
     addCoutWidth.reserve(total / 16);
+    compGtWidth.reserve(total / 16);
+    compEqWidth.reserve(total / 16);
+    compLtWidth.reserve(total / 16);
 
     auto idx = [&](int x, int y, int z)
     { return world.index(x, y, z); };
@@ -760,6 +776,53 @@ void updateLogic(World &world)
                     out = 0;
                     break;
                 }
+                case BlockType::Comparator:
+                {
+                    uint8_t wA = widthAt(x - 1, y, z);
+                    uint8_t wB = widthAt(x + 1, y, z);
+                    BlockType bLeft = world.inside(x - 1, y, z) ? world.get(x - 1, y, z) : BlockType::Air;
+                    BlockType bRight = world.inside(x + 1, y, z) ? world.get(x + 1, y, z) : BlockType::Air;
+                    bool leftConnected = (bLeft == BlockType::Wire || bLeft == BlockType::Button || bLeft == BlockType::Led ||
+                                          bLeft == BlockType::AndGate || bLeft == BlockType::OrGate ||
+                                          bLeft == BlockType::XorGate || bLeft == BlockType::NotGate ||
+                                          bLeft == BlockType::DFlipFlop || bLeft == BlockType::AddGate ||
+                                          bLeft == BlockType::Counter || bLeft == BlockType::Splitter ||
+                                          bLeft == BlockType::Merger || bLeft == BlockType::Decoder ||
+                                          bLeft == BlockType::Multiplexer || bLeft == BlockType::Comparator);
+                    bool rightConnected =
+                        (bRight == BlockType::Wire || bRight == BlockType::Button || bRight == BlockType::Led ||
+                         bRight == BlockType::AndGate || bRight == BlockType::OrGate || bRight == BlockType::XorGate ||
+                         bRight == BlockType::NotGate || bRight == BlockType::DFlipFlop || bRight == BlockType::AddGate ||
+                         bRight == BlockType::Counter || bRight == BlockType::Splitter || bRight == BlockType::Merger ||
+                         bRight == BlockType::Decoder || bRight == BlockType::Multiplexer || bRight == BlockType::Comparator);
+                    if (!leftConnected && !rightConnected)
+                    {
+                        out = 0;
+                        break;
+                    }
+                    // Treat missing widths as 1-bit to avoid degenerate mask when only one side is connected
+                    if (wA == 0)
+                        wA = 1;
+                    if (wB == 0)
+                        wB = 1;
+                    uint8_t w = static_cast<uint8_t>(std::max<uint8_t>(1, std::min<uint8_t>(std::min(wA, wB), 8)));
+                    uint16_t mask16 = w >= 8 ? 0xFFu : static_cast<uint16_t>((1u << w) - 1u);
+                    // Swap A/B semantics: left face is B, right face is A
+                    uint8_t bVal = static_cast<uint8_t>(powerAt(x - 1, y, z) & mask16);
+                    uint8_t a = static_cast<uint8_t>(powerAt(x + 1, y, z) & mask16);
+                    uint8_t outW = 1;
+                    compGtOutputs.push_back({x, y, z});
+                    compEqOutputs.push_back({x, y, z});
+                    compLtOutputs.push_back({x, y, z});
+                    compGtVal.push_back(a > bVal ? 1u : 0u);
+                    compEqVal.push_back(a == bVal ? 1u : 0u);
+                    compLtVal.push_back(a < bVal ? 1u : 0u);
+                    compGtWidth.push_back(outW);
+                    compEqWidth.push_back(outW);
+                    compLtWidth.push_back(outW);
+                    out = 0;
+                    break;
+                }
                 default:
                     out = 0;
                     break;
@@ -840,6 +903,30 @@ void updateLogic(World &world)
             setPower(ox, oy, oz, val, w);
         }
     }
+
+    auto pushComparatorOut = [&](const std::vector<std::array<int, 3>> &outs, const std::vector<uint8_t> &vals,
+                                 const std::vector<uint8_t> &widths, int dx, int dy, int dz)
+    {
+        for (size_t idxOut = 0; idxOut < outs.size(); ++idxOut)
+        {
+            const auto &g = outs[idxOut];
+            uint8_t val = vals[idxOut];
+            uint8_t w = widths[idxOut];
+            int ox = g[0] + dx;
+            int oy = g[1] + dy;
+            int oz = g[2] + dz;
+            if (!world.inside(ox, oy, oz))
+                continue;
+            if (val)
+                pushWire(ox, oy, oz, val, w);
+            else
+                setPower(ox, oy, oz, 0, w);
+        }
+    };
+    // ">": -Z, "=": +Z, "<": -Y
+    pushComparatorOut(compGtOutputs, compGtVal, compGtWidth, 0, 0, -1);
+    pushComparatorOut(compEqOutputs, compEqVal, compEqWidth, 0, 0, 1);
+    pushComparatorOut(compLtOutputs, compLtVal, compLtWidth, 0, -1, 0);
 
     // NOT outputs go toward -X only (input on +X)
     for (size_t idxOut = 0; idxOut < notOutputs.size(); ++idxOut)

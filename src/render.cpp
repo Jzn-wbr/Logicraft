@@ -15,7 +15,7 @@ int CHUNK_Z_COUNT = 0;
 std::vector<ChunkMesh> chunkMeshes;
 GLuint gAtlasTex = 0;
 const int ATLAS_COLS = 4;
-const int ATLAS_ROWS = 11; // increased to fit new gate tiles
+const int ATLAS_ROWS = 13; // increased to fit new gate tiles
 const int ATLAS_TILE_SIZE = 32;
 std::map<BlockType, int> gBlockTile;
 int gAndTopTile = 0;
@@ -32,6 +32,12 @@ int gMergerTopTile = 0;
 int gDecoderTopTile = 0;
 int gMuxTopTile = 0;
 int gMuxInTile[4] = {0, 0, 0, 0};
+int gComparatorTopTile = 0;
+int gComparatorInLeftTile = 0;
+int gComparatorInRightTile = 0;
+int gComparatorGtTile = 0;
+int gComparatorEqTile = 0;
+int gComparatorLtTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 7;
 const int INV_ROWS = 4;
@@ -670,7 +676,32 @@ void drawSkybox(GLuint cubemap, float size)
 }
 void createAtlasTexture()
 {
-    gBlockTile = {{BlockType::Grass, 0}, {BlockType::Dirt, 1}, {BlockType::Stone, 2}, {BlockType::Wood, 3}, {BlockType::Leaves, 4}, {BlockType::Water, 5}, {BlockType::Plank, 6}, {BlockType::Sand, 7}, {BlockType::Air, 8}, {BlockType::Glass, 9}, {BlockType::AndGate, 10}, {BlockType::OrGate, 11}, {BlockType::NotGate, 12}, {BlockType::XorGate, 13}, {BlockType::Led, 14}, {BlockType::Button, 15}, {BlockType::Wire, 16}, {BlockType::Sign, 17}, {BlockType::DFlipFlop, 18}, {BlockType::AddGate, 19}, {BlockType::Counter, 20}, {BlockType::Splitter, 21}, {BlockType::Merger, 22}, {BlockType::Decoder, 23}, {BlockType::Multiplexer, 24}};
+    gBlockTile = {{BlockType::Grass, 0},
+                  {BlockType::Dirt, 1},
+                  {BlockType::Stone, 2},
+                  {BlockType::Wood, 3},
+                  {BlockType::Leaves, 4},
+                  {BlockType::Water, 5},
+                  {BlockType::Plank, 6},
+                  {BlockType::Sand, 7},
+                  {BlockType::Air, 8},
+                  {BlockType::Glass, 9},
+                  {BlockType::AndGate, 10},
+                  {BlockType::OrGate, 11},
+                  {BlockType::NotGate, 12},
+                  {BlockType::XorGate, 13},
+                  {BlockType::Led, 14},
+                  {BlockType::Button, 15},
+                  {BlockType::Wire, 16},
+                  {BlockType::Sign, 17},
+                  {BlockType::DFlipFlop, 18},
+                  {BlockType::AddGate, 19},
+                  {BlockType::Counter, 20},
+                  {BlockType::Splitter, 21},
+                  {BlockType::Merger, 22},
+                  {BlockType::Decoder, 23},
+                  {BlockType::Multiplexer, 24},
+                  {BlockType::Comparator, 25}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
     gAndTopTile = nextTile++;
@@ -690,6 +721,12 @@ void createAtlasTexture()
     gMuxInTile[1] = nextTile++;
     gMuxInTile[2] = nextTile++;
     gMuxInTile[3] = nextTile++;
+    gComparatorTopTile = nextTile++;
+    gComparatorInLeftTile = nextTile++;
+    gComparatorInRightTile = nextTile++;
+    gComparatorGtTile = nextTile++;
+    gComparatorEqTile = nextTile++;
+    gComparatorLtTile = nextTile++;
 
     int texW = ATLAS_COLS * ATLAS_TILE_SIZE;
     int texH = ATLAS_ROWS * ATLAS_TILE_SIZE;
@@ -708,6 +745,11 @@ void createAtlasTexture()
                                                      std::max(gMuxInTile[0],
                                                               std::max(gMuxInTile[1],
                                                                        std::max(gMuxInTile[2], gMuxInTile[3])))))));
+    maxTileIdx = std::max(maxTileIdx,
+                          std::max(std::max(gComparatorTopTile, gComparatorInLeftTile),
+                                   std::max(gComparatorInRightTile,
+                                            std::max(gComparatorGtTile,
+                                                     std::max(gComparatorEqTile, gComparatorLtTile)))));
     if (maxTileIdx >= atlasCapacity)
     {
         std::cerr << "Atlas capacity too small for gate labels.\n";
@@ -743,6 +785,9 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Merger], base(BlockType::Merger), 23);
     fillTile(pixels, texW, gBlockTile[BlockType::Decoder], base(BlockType::Decoder), 24);
     fillTile(pixels, texW, gBlockTile[BlockType::Multiplexer], base(BlockType::Multiplexer), 26);
+    // Comparator inventory tile styled like other gates with clear label
+    fillGateTileWithLabels(pixels, texW, gBlockTile[BlockType::Comparator], base(BlockType::Comparator), 31, "CMP", "A",
+                           "B", "OUT");
     fillTile(pixels, texW, gMuxInTile[0], base(BlockType::Multiplexer), 27);
     fillTile(pixels, texW, gMuxInTile[1], base(BlockType::Multiplexer), 28);
     fillTile(pixels, texW, gMuxInTile[2], base(BlockType::Multiplexer), 29);
@@ -765,6 +810,20 @@ void createAtlasTexture()
     fillGateTileWithLabels(pixels, texW, gMergerTopTile, base(BlockType::Merger), 23, "MERGE", "B2", "B1", "BUS");
     fillGateTileWithLabels(pixels, texW, gDecoderTopTile, base(BlockType::Decoder), 24, "DEC", "EN", "SEL", "OUT");
     fillGateTileWithLabels(pixels, texW, gMuxTopTile, base(BlockType::Multiplexer), 26, "MUX", "OUT", "SEL", "");
+
+    auto fillComparatorLabel = [&](int tileIdx, const std::string &text)
+    {
+        fillTile(pixels, texW, tileIdx, base(BlockType::Comparator), 32);
+        blitTinyTextToTile(pixels, texW, tileIdx, 8, 12, text, 4, 245, 245, 240, 255);
+    };
+    // Top face shows inputs like other gate tops
+    fillGateTileWithLabels(pixels, texW, gComparatorTopTile, base(BlockType::Comparator), 32, "COMP", "A", "B", "OUT");
+    // Side faces keep a neutral texture; only outputs show symbols with direction dots
+    fillTile(pixels, texW, gComparatorInLeftTile, base(BlockType::Comparator), 32);
+    fillTile(pixels, texW, gComparatorInRightTile, base(BlockType::Comparator), 32);
+    fillComparatorLabel(gComparatorGtTile, ">.");
+    fillComparatorLabel(gComparatorEqTile, "=");
+    fillComparatorLabel(gComparatorLtTile, "<.");
 
     if (gAtlasTex == 0)
     {
@@ -987,15 +1046,28 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                             return gMergerTopTile;
                         if (b == BlockType::Decoder)
                             return gDecoderTopTile;
+                        if (b == BlockType::Comparator)
+                            return gComparatorTopTile;
                         if (b == BlockType::Multiplexer)
-                        {
                             return gMuxTopTile;
-                        }
                     }
                     if (ny == -1 && b == BlockType::AddGate)
                         return gAddBottomTile;
                     if (nz == -1 && b == BlockType::AddGate)
                         return gAddBackTile;
+                    if (b == BlockType::Comparator)
+                    {
+                        if (nx == -1)
+                            return gComparatorInLeftTile;
+                        if (nx == 1)
+                            return gComparatorInRightTile;
+                        if (nz == -1)
+                            return gComparatorGtTile;
+                        if (nz == 1)
+                            return gComparatorEqTile;
+                        if (ny == -1)
+                            return gComparatorLtTile;
+                    }
                     if (b == BlockType::Multiplexer)
                     {
                         if (nz == -1)
@@ -1090,6 +1162,19 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                                 return true;
                             if (dy == -1 || dy == 1)
                                 return true;
+                            return false;
+                        }
+                        if (nb == BlockType::Comparator)
+                        {
+                            // Inputs on -X/+X, outputs: > on -Z, = on +Z, < on -Y. Top (+Y) not connectable.
+                            if (dy == -1)
+                                return false; // top blocked
+                            if (dx == -1 || dx == 1)
+                                return true; // inputs
+                            if (dz == -1 || dz == 1)
+                                return true; // front/back outputs
+                            if (dy == 1)
+                                return true; // downward output
                             return false;
                         }
                         return nb == BlockType::Wire || nb == BlockType::Button || nb == BlockType::Led ||
