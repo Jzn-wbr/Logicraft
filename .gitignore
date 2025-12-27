@@ -1,7 +1,7 @@
 main.o
 render.o
 world.o
-messercraft.exe
+logicraft.exe
 build/
 vcpkg_installed/
 *.vcxproj

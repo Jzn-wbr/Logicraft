@@ -674,10 +674,17 @@ void drawInventoryBar(int winW, int winH, const std::vector<ItemStack> &hotbar, 
     const float barX = (winW - barWidth) * 0.5f;
     const float barY = winH - barHeight - 20.0f;
 
-    // glassy background
-    drawQuad(barX, barY, barWidth, barHeight, 0.05f, 0.05f, 0.08f, 0.65f);
-    drawOutline(barX, barY, barWidth, barHeight, 1.0f, 1.0f, 1.0f, 0.08f, 3.0f);
-    drawOutline(barX + 4.0f, barY + 4.0f, barWidth - 8.0f, barHeight - 8.0f, 0.0f, 0.0f, 0.0f, 0.35f, 2.0f);
+    // brushed metal bar shell
+    drawQuad(barX + 8.0f, barY + 10.0f, barWidth, barHeight, 0.0f, 0.0f, 0.0f, 0.32f);
+    drawQuad(barX, barY, barWidth, barHeight, 0.06f, 0.065f, 0.075f, 0.96f);
+    drawQuad(barX, barY, barWidth, barHeight * 0.4f, 0.1f, 0.11f, 0.13f, 0.55f);
+    for (int i = 0; i < 6; ++i)
+    {
+        float y = barY + 14.0f + i * 10.0f;
+        drawQuad(barX + 10.0f, y, barWidth - 20.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.04f);
+    }
+    drawOutline(barX, barY, barWidth, barHeight, 0.95f, 0.95f, 0.95f, 0.2f, 3.0f);
+    drawOutline(barX + 3.0f, barY + 3.0f, barWidth - 6.0f, barHeight - 6.0f, 0.0f, 0.0f, 0.0f, 0.55f, 2.0f);
 
     for (int i = 0; i < slotCount; ++i)
     {
@@ -688,14 +695,16 @@ void drawInventoryBar(int winW, int winH, const std::vector<ItemStack> &hotbar, 
             b = BlockType::Air;
         auto col = BLOCKS.at(b).color;
 
-        // slot shell
-        drawQuad(x - 4.0f, y - 4.0f, slotSize + 8.0f, slotSize + 8.0f, 0.0f, 0.0f, 0.0f, 0.25f);
-        drawOutline(x - 4.0f, y - 4.0f, slotSize + 8.0f, slotSize + 8.0f, 1.0f, 1.0f, 1.0f, 0.08f, 2.0f);
+        // slot shell (metal frame + glass insert)
+        drawQuad(x - 3.0f, y - 3.0f, slotSize + 6.0f, slotSize + 6.0f, 0.0f, 0.0f, 0.0f, 0.3f);
+        drawQuad(x - 1.0f, y - 1.0f, slotSize + 2.0f, slotSize + 2.0f, 0.09f, 0.095f, 0.11f, 0.7f);
+        drawOutline(x - 4.0f, y - 4.0f, slotSize + 8.0f, slotSize + 8.0f, 0.95f, 0.95f, 0.95f, 0.18f, 2.0f);
 
         // block color tile
-        float alpha = hotbar[i].count > 0 ? 0.95f : 0.35f;
+        float alpha = hotbar[i].count > 0 ? 0.9f : 0.25f;
         drawQuad(x, y, slotSize, slotSize, col[0], col[1], col[2], alpha);
-        drawOutline(x, y, slotSize, slotSize, 0.0f, 0.0f, 0.0f, 0.45f, 2.0f);
+        drawQuad(x + 2.0f, y + 2.0f, slotSize - 4.0f, slotSize * 0.45f, 1.0f, 1.0f, 1.0f, 0.09f);
+        drawOutline(x, y, slotSize, slotSize, 0.0f, 0.0f, 0.0f, 0.55f, 2.0f);
         drawSlotIcon(hotbar[i], x, y, slotSize);
 
         // stack count
@@ -705,8 +714,8 @@ void drawInventoryBar(int winW, int winH, const std::vector<ItemStack> &hotbar, 
         // selection glow
         if (i == selected)
         {
-            drawOutline(x - 6.0f, y - 6.0f, slotSize + 12.0f, slotSize + 12.0f, 1.0f, 0.9f, 0.2f, 0.9f, 3.5f);
-            drawQuad(x - 2.0f, y - 2.0f, slotSize + 4.0f, slotSize + 4.0f, 1.0f, 0.85f, 0.35f, 0.12f);
+            drawOutline(x - 6.0f, y - 6.0f, slotSize + 12.0f, slotSize + 12.0f, 0.95f, 0.85f, 0.35f, 0.9f, 3.5f);
+            drawQuad(x - 2.0f, y - 2.0f, slotSize + 4.0f, slotSize + 4.0f, 0.95f, 0.8f, 0.35f, 0.18f);
         }
     }
 }
@@ -794,21 +803,26 @@ SaveMenuLayout computeSaveMenuLayout(int winW, int winH)
 
 void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResume, bool hoverManage, bool hoverSettings, bool hoverQuit)
 {
-    drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.55f);
-    drawQuad(l.panelX, l.panelY, l.panelW, l.panelH, 0.05f, 0.05f, 0.08f, 0.92f);
-    drawOutline(l.panelX, l.panelY, l.panelW, l.panelH, 1.0f, 1.0f, 1.0f, 0.08f, 3.0f);
+    drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.65f);
+    drawQuad(l.panelX + 8.0f, l.panelY + 10.0f, l.panelW, l.panelH, 0.0f, 0.0f, 0.0f, 0.3f);
+    drawQuad(l.panelX, l.panelY, l.panelW, l.panelH, 0.06f, 0.06f, 0.07f, 0.96f);
+    drawOutline(l.panelX, l.panelY, l.panelW, l.panelH, 0.9f, 0.9f, 0.9f, 0.15f, 2.5f);
+    drawQuad(l.panelX + 20.0f, l.panelY + 26.0f, l.panelW - 40.0f, 2.0f, 1.0f, 1.0f, 1.0f, 0.06f);
+    drawTextTiny(l.panelX + 24.0f, l.panelY + 12.0f, 2.0f, "PAUSE", 0.95f, 0.95f, 0.92f, 1.0f);
 
     auto drawButton = [](float x, float y, float w, float h, float r, float g, float b, bool hover)
     {
-        float a = hover ? 0.95f : 0.8f;
+        float a = hover ? 0.98f : 0.9f;
+        float accent = hover ? 0.98f : 0.85f;
         drawQuad(x, y, w, h, r, g, b, a);
-        drawOutline(x, y, w, h, 0.0f, 0.0f, 0.0f, 0.45f, 3.0f);
+        drawQuad(x, y, w, h * 0.45f, 1.0f, 1.0f, 1.0f, hover ? 0.12f : 0.08f);
+        drawOutline(x, y, w, h, accent, accent, accent, hover ? 0.32f : 0.22f, hover ? 2.8f : 2.0f);
     };
 
-    drawButton(l.resumeX, l.resumeY, l.resumeW, l.resumeH, 0.16f, 0.55f, 0.25f, hoverResume);
-    drawButton(l.manageX, l.manageY, l.manageW, l.manageH, 0.2f, 0.4f, 0.8f, hoverManage);
-    drawButton(l.settingsX, l.settingsY, l.settingsW, l.settingsH, 0.35f, 0.2f, 0.7f, hoverSettings);
-    drawButton(l.quitX, l.quitY, l.quitW, l.quitH, 0.65f, 0.18f, 0.12f, hoverQuit);
+    drawButton(l.resumeX, l.resumeY, l.resumeW, l.resumeH, 0.16f, 0.17f, 0.2f, hoverResume);
+    drawButton(l.manageX, l.manageY, l.manageW, l.manageH, 0.16f, 0.17f, 0.2f, hoverManage);
+    drawButton(l.settingsX, l.settingsY, l.settingsW, l.settingsH, 0.16f, 0.17f, 0.2f, hoverSettings);
+    drawButton(l.quitX, l.quitY, l.quitW, l.quitH, 0.2f, 0.15f, 0.14f, hoverQuit);
 
     auto centerTinyText = [](float x, float y, float w, float size, const std::string &txt, float r, float g, float b,
                              float a)
@@ -818,15 +832,15 @@ void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResum
         drawTextTiny(tx, y, size, txt, r, g, b, a);
     };
 
-    float labelSize = 1.7f;
-    centerTinyText(l.resumeX, l.resumeY + l.resumeH * 0.33f, l.resumeW, labelSize, "RESUME", 1.0f, 1.0f, 1.0f,
-                   hoverResume ? 1.0f : 0.9f);
-    centerTinyText(l.manageX, l.manageY + l.manageH * 0.33f, l.manageW, labelSize, "SAVE / LOAD", 1.0f, 1.0f, 1.0f,
-                   hoverManage ? 1.0f : 0.9f);
-    centerTinyText(l.settingsX, l.settingsY + l.settingsH * 0.33f, l.settingsW, labelSize, "REGLAGES", 1.0f, 1.0f, 1.0f,
-                   hoverSettings ? 1.0f : 0.9f);
-    centerTinyText(l.quitX, l.quitY + l.quitH * 0.33f, l.quitW, labelSize, "QUIT", 1.0f, 1.0f, 1.0f,
-                   hoverQuit ? 1.0f : 0.9f);
+    float labelSize = 1.8f;
+    centerTinyText(l.resumeX, l.resumeY + l.resumeH * 0.33f, l.resumeW, labelSize, "RESUME", 1.0f, 1.0f, 0.98f,
+                   hoverResume ? 1.0f : 0.92f);
+    centerTinyText(l.manageX, l.manageY + l.manageH * 0.33f, l.manageW, labelSize, "SAVE / LOAD", 1.0f, 1.0f, 0.98f,
+                   hoverManage ? 1.0f : 0.92f);
+    centerTinyText(l.settingsX, l.settingsY + l.settingsH * 0.33f, l.settingsW, labelSize, "REGLAGES", 1.0f, 1.0f, 0.98f,
+                   hoverSettings ? 1.0f : 0.92f);
+    centerTinyText(l.quitX, l.quitY + l.quitH * 0.33f, l.quitW, labelSize, "QUIT", 1.0f, 1.0f, 0.98f,
+                   hoverQuit ? 1.0f : 0.92f);
 }
 
 void drawSaveMenu(int winW, int winH, const SaveMenuLayout &s, int highlightedIndex, bool hoverCreate,
@@ -1015,28 +1029,29 @@ MainMenuLayout computeMainMenuLayout(int winW, int winH)
 
 void drawMainMenu(int winW, int winH, const MainMenuLayout &l, bool hoverPlay, bool hoverSettings, bool hoverQuit, float t)
 {
-    float gradTop = 0.05f + 0.05f * std::sin(t * 0.6f);
-    float gradBottom = 0.1f;
-    drawQuad(0, 0, static_cast<float>(winW), static_cast<float>(winH), gradTop, gradTop, gradTop, 1.0f);
-    drawQuad(0, static_cast<float>(winH) * 0.5f, static_cast<float>(winW), static_cast<float>(winH) * 0.5f, gradBottom,
-             gradBottom, gradBottom + 0.05f, 1.0f);
+    float gradTop = 0.04f + 0.03f * std::sin(t * 0.4f);
+    float gradBottom = 0.08f;
+    drawQuad(0, 0, static_cast<float>(winW), static_cast<float>(winH), gradTop, gradTop, gradTop + 0.02f, 1.0f);
+    drawQuad(0, static_cast<float>(winH) * 0.5f, static_cast<float>(winW), static_cast<float>(winH) * 0.5f,
+             gradBottom, gradBottom, gradBottom + 0.02f, 1.0f);
 
-    float glow = 0.12f + 0.05f * std::sin(t * 1.2f);
-    drawQuad(l.titleX - 220.0f, l.titleY - 48.0f, 440.0f, 120.0f, 0.2f, 0.25f, 0.5f, glow);
-    drawOutline(l.titleX - 220.0f, l.titleY - 48.0f, 440.0f, 120.0f, 1.0f, 1.0f, 1.0f, 0.12f, 3.0f);
-    drawTextTiny(l.titleX - 200.0f, l.titleY, 8.0f, "Logicraft", 1.0f, 0.97f, 0.9f, 1.0f);
-    drawTextTiny(l.titleX - 200.0f, l.titleY - 70.0f, 3.4f, "Version 2.1 dispo !", 1.0f, 0.9f, 0.3f, 1.0f);
-    drawTextTiny(l.titleX + 110.0f, l.titleY - 62.0f, 2.0f, "Bus 8 bits, nouveaux blocs, reglages, ...", 0.95f, 0.92f, 0.85f, 0.9f);
-    drawTextTiny(l.titleX - 200.0f, l.titleY + 100.0f, 3.2f, "Logic sandbox, made yours", 0.9f, 0.9f, 1.0f, 0.85f);
+    drawQuad(l.titleX - 250.0f, l.titleY - 60.0f, 500.0f, 140.0f, 0.05f, 0.055f, 0.065f, 0.92f);
+    drawOutline(l.titleX - 250.0f, l.titleY - 60.0f, 500.0f, 140.0f, 0.9f, 0.9f, 0.9f, 0.18f, 2.5f);
+    drawQuad(l.titleX - 230.0f, l.titleY + 8.0f, 460.0f, 2.0f, 1.0f, 1.0f, 1.0f, 0.08f);
+    // Title with subtle depth
+    drawTextTiny(l.titleX - 200.0f + 2.0f, l.titleY + 2.0f, 8.6f, "Logicraft", 0.0f, 0.0f, 0.0f, 0.35f);
+    drawTextTiny(l.titleX - 200.0f, l.titleY, 8.6f, "Logicraft", 1.0f, 0.99f, 0.94f, 1.0f);
+    drawTextTiny(l.titleX - 200.0f, l.titleY + 76.0f, 2.6f, "Logic sandbox", 0.9f, 0.9f, 0.9f, 0.85f);
 
     auto drawBtn = [&](float x, float y, float w, float h, const char *label, bool hover)
     {
-        float base = hover ? 0.22f : 0.14f;
-        float accent = hover ? 0.9f : 0.75f;
-        drawQuad(x, y, w, h, base, base, base + 0.05f, 0.92f);
-        drawOutline(x, y, w, h, accent, accent, accent, 0.35f, hover ? 3.0f : 2.0f);
+        float base = hover ? 0.18f : 0.14f;
+        float accent = hover ? 0.98f : 0.85f;
+        drawQuad(x, y, w, h, base, base, base + 0.03f, 0.96f);
+        drawQuad(x, y, w, h * 0.45f, 1.0f, 1.0f, 1.0f, hover ? 0.12f : 0.08f);
+        drawOutline(x, y, w, h, accent, accent, accent, hover ? 0.32f : 0.22f, hover ? 2.8f : 2.0f);
         float tw = static_cast<float>(std::strlen(label)) * (4.0f * 3.4f + 3.4f * 0.8f) - 3.4f * 0.8f;
-        drawTextTiny(x + (w - tw) * 0.5f, y + h * 0.35f, 3.4f, label, 1.0f, 0.98f, 0.92f, 1.0f);
+        drawTextTiny(x + (w - tw) * 0.5f, y + h * 0.35f, 3.4f, label, 1.0f, 1.0f, 0.98f, 1.0f);
     };
     drawBtn(l.playX, l.playY, l.playW, l.playH, "Jouer", hoverPlay);
     drawBtn(l.settingsX, l.settingsY, l.settingsW, l.settingsH, "Reglages", hoverSettings);
@@ -1050,7 +1065,6 @@ struct SettingsMenuLayout
     float sensMinusX = 0, sensMinusY = 0, sensMinusW = 0, sensMinusH = 0;
     float sensPlusX = 0, sensPlusY = 0, sensPlusW = 0, sensPlusH = 0;
     float fpsBoxX = 0, fpsBoxY = 0, fpsBoxW = 0, fpsBoxH = 0;
-    float vsyncBoxX = 0, vsyncBoxY = 0, vsyncBoxW = 0, vsyncBoxH = 0;
     float fullscreenBoxX = 0, fullscreenBoxY = 0, fullscreenBoxW = 0, fullscreenBoxH = 0;
 };
 
@@ -1073,14 +1087,10 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
     s.fpsBoxH = 22.0f;
     s.fpsBoxX = s.panelX + 220.0f;
     s.fpsBoxY = s.panelY + 164.0f;
-    s.vsyncBoxW = 22.0f;
-    s.vsyncBoxH = 22.0f;
-    s.vsyncBoxX = s.panelX + 220.0f;
-    s.vsyncBoxY = s.panelY + 206.0f;
     s.fullscreenBoxW = 22.0f;
     s.fullscreenBoxH = 22.0f;
     s.fullscreenBoxX = s.panelX + 220.0f;
-    s.fullscreenBoxY = s.panelY + 228.0f;
+    s.fullscreenBoxY = s.panelY + 206.0f;
     s.backW = 140.0f;
     s.backH = 44.0f;
     s.backX = s.panelX + s.panelW - s.backW - 24.0f;
@@ -1089,7 +1099,7 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
 }
 
 void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Config &cfg, bool hoverBack,
-                      bool hoverMinus, bool hoverPlus, bool hoverFps, bool hoverVsync, bool hoverFullscreen)
+                      bool hoverMinus, bool hoverPlus, bool hoverFps, bool hoverFullscreen)
 {
     drawQuad(0, 0, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.35f);
     drawQuad(s.panelX, s.panelY, s.panelW, s.panelH, 0.05f, 0.06f, 0.08f, 0.92f);
@@ -1114,13 +1124,7 @@ void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Con
     if (cfg.showFps)
         drawTextTiny(s.fpsBoxX + 5.0f, s.fpsBoxY + 5.0f, 2.4f, "X", 1.0f, 0.98f, 0.92f, 1.0f);
 
-    drawTextTiny(s.panelX + 24.0f, s.panelY + 212.0f, 2.6f, "Vsync", 0.95f, 0.95f, 0.95f, 1.0f);
-    drawQuad(s.vsyncBoxX, s.vsyncBoxY, s.vsyncBoxW, s.vsyncBoxH, hoverVsync ? 0.3f : 0.18f, 0.18f, 0.18f, 0.9f);
-    drawOutline(s.vsyncBoxX, s.vsyncBoxY, s.vsyncBoxW, s.vsyncBoxH, 1.0f, 1.0f, 1.0f, 0.25f, hoverVsync ? 2.5f : 2.0f);
-    if (cfg.vsync)
-        drawTextTiny(s.vsyncBoxX + 5.0f, s.vsyncBoxY + 5.0f, 2.4f, "X", 1.0f, 0.98f, 0.92f, 1.0f);
-
-    drawTextTiny(s.panelX + 24.0f, s.panelY + 250.0f, 2.6f, "Fenetration", 0.95f, 0.95f, 0.95f, 1.0f);
+    drawTextTiny(s.panelX + 24.0f, s.panelY + 212.0f, 2.6f, "Fenetration", 0.95f, 0.95f, 0.95f, 1.0f);
     drawQuad(s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH, hoverFullscreen ? 0.3f : 0.18f,
              0.18f, 0.18f, 0.9f);
     drawOutline(s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH, 1.0f, 1.0f, 1.0f, 0.25f,
@@ -2132,11 +2136,13 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
 void drawSlotBox(float x, float y, float slotSize, const ItemStack &slot, bool selected, bool hovered)
 {
     auto col = BLOCKS.at(slot.count > 0 ? slot.type : BlockType::Air).color;
-    float alpha = slot.count > 0 ? 0.95f : 0.28f;
-    drawQuad(x - 4.0f, y - 4.0f, slotSize + 8.0f, slotSize + 8.0f, 0.0f, 0.0f, 0.0f, 0.25f);
-    drawOutline(x - 4.0f, y - 4.0f, slotSize + 8.0f, slotSize + 8.0f, 1.0f, 1.0f, 1.0f, 0.08f, 2.0f);
+    float alpha = slot.count > 0 ? 0.95f : 0.25f;
+    drawQuad(x - 3.0f, y - 3.0f, slotSize + 6.0f, slotSize + 6.0f, 0.0f, 0.0f, 0.0f, 0.28f);
+    drawQuad(x - 1.0f, y - 1.0f, slotSize + 2.0f, slotSize + 2.0f, 0.08f, 0.08f, 0.12f, 0.55f);
+    drawOutline(x - 4.0f, y - 4.0f, slotSize + 8.0f, slotSize + 8.0f, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
     drawQuad(x, y, slotSize, slotSize, col[0], col[1], col[2], alpha);
-    drawOutline(x, y, slotSize, slotSize, 0.0f, 0.0f, 0.0f, 0.45f, 2.0f);
+    drawQuad(x, y, slotSize, slotSize * 0.5f, 1.0f, 1.0f, 1.0f, 0.06f);
+    drawOutline(x, y, slotSize, slotSize, 0.0f, 0.0f, 0.0f, 0.5f, 2.0f);
     drawSlotIcon(slot, x, y, slotSize);
     if (slot.count > 0)
         drawNumber(x + slotSize - 4.0f, y + slotSize - 16.0f, slot.count, 10.0f, 0.0f, 0.0f, 0.0f, 1.0f);
@@ -2200,8 +2206,21 @@ void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &invent
     float invX = (winW - invWidth) * 0.5f;
     float invY = (winH - invHeight) * 0.5f - 40.0f;
 
-    drawQuad(invX - 18.0f, invY - 22.0f, invWidth + 36.0f, invHeight + 130.0f, 0.03f, 0.03f, 0.06f, 0.85f);
-    drawOutline(invX - 18.0f, invY - 22.0f, invWidth + 36.0f, invHeight + 130.0f, 1.0f, 1.0f, 1.0f, 0.08f, 3.0f);
+    float panelX = invX - 22.0f;
+    float panelY = invY - 30.0f;
+    float panelW = invWidth + 44.0f;
+    float panelH = invHeight + 160.0f;
+    drawQuad(panelX + 12.0f, panelY + 14.0f, panelW, panelH, 0.0f, 0.0f, 0.0f, 0.32f);
+    drawQuad(panelX, panelY, panelW, panelH, 0.055f, 0.06f, 0.07f, 0.97f);
+    drawQuad(panelX, panelY, panelW, panelH * 0.38f, 0.1f, 0.11f, 0.13f, 0.55f);
+    for (int i = 0; i < 8; ++i)
+    {
+        float y = panelY + 18.0f + i * 11.0f;
+        drawQuad(panelX + 12.0f, y, panelW - 24.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.035f);
+    }
+    drawOutline(panelX, panelY, panelW, panelH, 0.95f, 0.95f, 0.95f, 0.22f, 3.0f);
+    drawOutline(panelX + 4.0f, panelY + 4.0f, panelW - 8.0f, panelH - 8.0f, 0.0f, 0.0f, 0.0f, 0.55f, 2.0f);
+    drawTextTiny(panelX + 26.0f, panelY + 16.0f, 2.2f, "INVENTAIRE", 0.98f, 0.98f, 0.95f, 1.0f);
 
     for (int row = 0; row < INV_ROWS; ++row)
     {
@@ -2225,9 +2244,16 @@ void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &invent
 
     float hbWidth = padding * 2 + static_cast<float>(HOTBAR.size()) * slotSize + (HOTBAR.size() + 1) * gap;
     float hbX = (winW - hbWidth) * 0.5f;
-    float hbY = invY + invHeight + 40.0f;
-    drawQuad(hbX - 10.0f, hbY - 10.0f, hbWidth + 20.0f, slotSize + padding * 2 + 20.0f, 0.05f, 0.05f, 0.08f, 0.75f);
-    drawOutline(hbX - 10.0f, hbY - 10.0f, hbWidth + 20.0f, slotSize + padding * 2 + 20.0f, 1.0f, 1.0f, 1.0f, 0.06f, 2.0f);
+    float hbY = invY + invHeight + 48.0f;
+    float hbPanelX = hbX - 14.0f;
+    float hbPanelY = hbY - 16.0f;
+    float hbPanelW = hbWidth + 28.0f;
+    float hbPanelH = slotSize + padding * 2 + 26.0f;
+    drawQuad(hbPanelX + 10.0f, hbPanelY + 12.0f, hbPanelW, hbPanelH, 0.0f, 0.0f, 0.0f, 0.32f);
+    drawQuad(hbPanelX, hbPanelY, hbPanelW, hbPanelH, 0.055f, 0.06f, 0.07f, 0.95f);
+    drawQuad(hbPanelX, hbPanelY, hbPanelW, hbPanelH * 0.4f, 0.1f, 0.11f, 0.13f, 0.5f);
+    drawOutline(hbPanelX, hbPanelY, hbPanelW, hbPanelH, 0.95f, 0.95f, 0.95f, 0.2f, 2.0f);
+    drawTextTiny(hbPanelX + 20.0f, hbPanelY + 10.0f, 1.9f, "HOTBAR", 0.92f, 0.92f, 0.88f, 1.0f);
 
     for (int i = 0; i < static_cast<int>(HOTBAR.size()); ++i)
     {
@@ -2987,7 +3013,6 @@ int main(int argc, char **argv)
                         bool hoverMinus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensMinusX, s.sensMinusY, s.sensMinusW, s.sensMinusH);
                         bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY, s.sensPlusW, s.sensPlusH);
                         bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH);
-                        bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY, s.vsyncBoxW, s.vsyncBoxH);
                         bool hoverFullscreen = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH);
                         bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW, s.backH);
                         if (hoverMinus)
@@ -3003,12 +3028,6 @@ int main(int argc, char **argv)
                         else if (hoverFps)
                         {
                             gConfig.showFps = !gConfig.showFps;
-                            saveConfig(gConfig);
-                        }
-                        else if (hoverVsync)
-                        {
-                            gConfig.vsync = !gConfig.vsync;
-                            SDL_GL_SetSwapInterval(gConfig.vsync ? 1 : 0);
                             saveConfig(gConfig);
                         }
                         else if (hoverFullscreen)
@@ -3062,7 +3081,6 @@ int main(int argc, char **argv)
                         bool hoverMinus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensMinusX, s.sensMinusY, s.sensMinusW, s.sensMinusH);
                         bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY, s.sensPlusW, s.sensPlusH);
                         bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH);
-                        bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY, s.vsyncBoxW, s.vsyncBoxH);
                         bool hoverFullscreen = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH);
                         bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW, s.backH);
                         if (hoverMinus)
@@ -3078,12 +3096,6 @@ int main(int argc, char **argv)
                         else if (hoverFps)
                         {
                             gConfig.showFps = !gConfig.showFps;
-                            saveConfig(gConfig);
-                        }
-                        else if (hoverVsync)
-                        {
-                            gConfig.vsync = !gConfig.vsync;
-                            SDL_GL_SetSwapInterval(gConfig.vsync ? 1 : 0);
                             saveConfig(gConfig);
                         }
                         else if (hoverFullscreen)
@@ -3463,14 +3475,12 @@ int main(int argc, char **argv)
                                              s.sensPlusW, s.sensPlusH);
                 bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
                                             s.fpsBoxW, s.fpsBoxH);
-                bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY,
-                                              s.vsyncBoxW, s.vsyncBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
                 bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW,
                                              s.backH);
-                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverVsync, hoverFullscreen);
+                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
             }
             endHud();
             SDL_GL_SwapWindow(window);
@@ -3603,14 +3613,12 @@ int main(int argc, char **argv)
                                              s.sensPlusW, s.sensPlusH);
                 bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
                                             s.fpsBoxW, s.fpsBoxH);
-                bool hoverVsync = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.vsyncBoxX, s.vsyncBoxY,
-                                              s.vsyncBoxW, s.vsyncBoxH);
                 bool hoverFullscreen =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
                                 s.fullscreenBoxW, s.fullscreenBoxH);
                 bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW,
                                              s.backH);
-                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverVsync, hoverFullscreen);
+                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
             }
             else if (saveMenuOpen)
             {
