@@ -2,3 +2,10 @@ main.o
 render.o
 world.o
 messercraft.exe
+build/
+vcpkg_installed/
+*.vcxproj
+*.vcxproj.filters
+*.user
+*.sln
+*.exe

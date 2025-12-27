@@ -1,4 +1,13 @@
 #define SDL_MAIN_HANDLED
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
@@ -22,6 +31,44 @@
 #include "render.hpp"
 #include "types.hpp"
 #include "world.hpp"
+
+static std::filesystem::path gResourceRoot = std::filesystem::current_path();
+static std::filesystem::path gMapsDir = "maps";
+
+std::filesystem::path resolveResourceRoot(const std::string &argv0)
+{
+    namespace fs = std::filesystem;
+    fs::path exePath;
+    if (!argv0.empty())
+    {
+        std::error_code ec;
+        exePath = fs::weakly_canonical(fs::path(argv0), ec);
+        if (ec)
+            exePath.clear();
+    }
+
+    std::vector<fs::path> candidates = {fs::current_path()};
+    if (!exePath.empty())
+    {
+        candidates.push_back(exePath.parent_path());
+        candidates.push_back(exePath.parent_path().parent_path());
+        candidates.push_back(exePath.parent_path().parent_path().parent_path());
+    }
+
+    for (const auto &base : candidates)
+    {
+        if (base.empty())
+            continue;
+        if (fs::exists(base / "images") && fs::exists(base / "maps"))
+            return base;
+    }
+    return fs::current_path();
+}
+
+std::string assetPath(const std::string &relative)
+{
+    return (gResourceRoot / relative).string();
+}
 
 void drawTextTiny(float x, float y, float size, const std::string &text, float r, float g, float b, float a);
 std::string stemFromPath(const std::string &path);
@@ -1234,8 +1281,6 @@ void saveConfig(const Config &cfg)
 }
 
 // ---------- Save / Load ----------
-static const char *MAPS_DIR = "maps";
-
 struct SaveHeader
 {
     char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
@@ -1445,15 +1490,15 @@ std::string timestampSaveName()
     localtime_r(&t, &tmStruct);
 #endif
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "maps/%04d%02d%02d_%02d%02d%02d.bulldog", tmStruct.tm_year + 1900,
+    std::snprintf(buf, sizeof(buf), "%04d%02d%02d_%02d%02d%02d.bulldog", tmStruct.tm_year + 1900,
                   tmStruct.tm_mon + 1, tmStruct.tm_mday, tmStruct.tm_hour, tmStruct.tm_min, tmStruct.tm_sec);
-    return std::string(buf);
+    return (gMapsDir / buf).string();
 }
 
 std::string latestSaveInMaps()
 {
     namespace fs = std::filesystem;
-    fs::path dir(MAPS_DIR);
+    fs::path dir = gMapsDir;
     if (!fs::exists(dir))
         return {};
     fs::file_time_type latestTime;
@@ -1506,7 +1551,7 @@ void refreshSaveList()
     gSaveList.clear();
     gSaveIndex = -1;
     namespace fs = std::filesystem;
-    fs::path dir(MAPS_DIR);
+    fs::path dir = gMapsDir;
     if (!fs::exists(dir))
         return;
     std::vector<std::pair<fs::file_time_type, std::string>> entries;
@@ -1570,7 +1615,7 @@ std::string buildSavePathFromInput(const std::string &input)
     const std::string ext = ".bulldog";
     if (name.size() < ext.size() || name.substr(name.size() - ext.size()) != ext)
         name += ext;
-    return std::string("maps/") + name;
+    return (gMapsDir / name).string();
 }
 
 void drawButtonStateLabels(const World &world, const Player &player, float radius)
@@ -2188,7 +2233,7 @@ void updateTitle(SDL_Window *window)
     SDL_SetWindowTitle(window, title.c_str());
 }
 
-int main()
+int main(int argc, char **argv)
 {
     const int WIDTH = 96;
     const int HEIGHT = 48;
@@ -2202,6 +2247,13 @@ int main()
     const float FLY_SPRINT_MULT = 2.4f;
     const float FLY_VERTICAL_MULT = 0.2f;
     const float SPRINT_DOUBLE_TAP = 0.3f;
+
+    gResourceRoot = resolveResourceRoot(argc > 0 ? argv[0] : "");
+    gMapsDir = gResourceRoot / "maps";
+    {
+        std::error_code ec;
+        std::filesystem::current_path(gResourceRoot, ec);
+    }
 
     loadConfig(gConfig);
 
@@ -2246,25 +2298,28 @@ int main()
     }
 
     createAtlasTexture();
-    GLuint npcTexture = loadTextureFromBMP("images/npc_head.bmp");
+    GLuint npcTexture = loadTextureFromBMP(assetPath("images/npc_head.bmp"));
     if (npcTexture == 0)
     {
         std::cerr << "Could not load NPC texture (images/npc_head.bmp). Using flat color.\n";
     }
-    GLuint npcTextureAlt = loadTextureFromBMP("images/npc_head_alt.bmp");
+    GLuint npcTextureAlt = loadTextureFromBMP(assetPath("images/npc_head_alt.bmp"));
     if (npcTextureAlt == 0)
     {
         std::cerr << "Could not load NPC texture (images/npc_head_alt.bmp). Using flat color.\n";
     }
-    std::array<std::string, 6> skyboxPaths = {"images/skybox_night_right.bmp", "images/skybox_night_left.bmp",
-                                              "images/skybox_night_top.bmp", "images/skybox_night_bottom.bmp",
-                                              "images/skybox_night_front.bmp", "images/skybox_night_back.bmp"};
+    std::array<std::string, 6> skyboxPaths = {assetPath("images/skybox_night_right.bmp"),
+                                              assetPath("images/skybox_night_left.bmp"),
+                                              assetPath("images/skybox_night_top.bmp"),
+                                              assetPath("images/skybox_night_bottom.bmp"),
+                                              assetPath("images/skybox_night_front.bmp"),
+                                              assetPath("images/skybox_night_back.bmp")};
     GLuint skyboxTex = loadCubemapFromBMP(skyboxPaths);
     if (skyboxTex == 0)
     {
         std::cerr << "Could not load skybox cubemap. It will be skipped.\n";
     }
-    GLuint npcTextureAI = loadTextureFromBMP("images/mon_npc.bmp");
+    GLuint npcTextureAI = loadTextureFromBMP(assetPath("images/mon_npc.bmp"));
     if (npcTextureAI == 0)
     {
         std::cerr << "Could not load NPC texture (images/mon_npc.bmp). Using flat color.\n";
