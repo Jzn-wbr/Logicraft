@@ -1024,7 +1024,7 @@ void drawMainMenu(int winW, int winH, const MainMenuLayout &l, bool hoverPlay, b
     float glow = 0.12f + 0.05f * std::sin(t * 1.2f);
     drawQuad(l.titleX - 220.0f, l.titleY - 48.0f, 440.0f, 120.0f, 0.2f, 0.25f, 0.5f, glow);
     drawOutline(l.titleX - 220.0f, l.titleY - 48.0f, 440.0f, 120.0f, 1.0f, 1.0f, 1.0f, 0.12f, 3.0f);
-    drawTextTiny(l.titleX - 200.0f, l.titleY, 8.0f, "SigmaCraft", 1.0f, 0.97f, 0.9f, 1.0f);
+    drawTextTiny(l.titleX - 200.0f, l.titleY, 8.0f, "Logicraft", 1.0f, 0.97f, 0.9f, 1.0f);
     drawTextTiny(l.titleX - 200.0f, l.titleY - 70.0f, 3.4f, "Version 2.1.3 dispo !", 1.0f, 0.9f, 0.3f, 1.0f);
     drawTextTiny(l.titleX + 110.0f, l.titleY - 62.0f, 2.0f, "Bus 8 bits, nouveaux blocs, reglages, ...", 0.95f, 0.92f, 0.85f, 0.9f);
     drawTextTiny(l.titleX - 200.0f, l.titleY + 100.0f, 3.2f, "Logic sandbox, made yours", 0.9f, 0.9f, 1.0f, 0.85f);
@@ -2229,7 +2229,7 @@ int addToInventory(BlockType b, int amount, std::vector<ItemStack> &hotbarSlots,
 
 void updateTitle(SDL_Window *window)
 {
-    std::string title = "SigmaCraft";
+    std::string title = "Logicraft";
     SDL_SetWindowTitle(window, title.c_str());
 }
 
@@ -2267,7 +2267,7 @@ int main(int argc, char **argv)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
-    SDL_Window *window = SDL_CreateWindow("MiniCraft 3D", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720,
+    SDL_Window *window = SDL_CreateWindow("Logicraft", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720,
                                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (!window)
     {

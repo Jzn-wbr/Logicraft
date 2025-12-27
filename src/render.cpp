@@ -1337,12 +1337,14 @@ void drawNpcBlocky(const NPC &npc)
     const float s = 0.25f;
     float baseY = npc.y;
 
-    auto drawColoredCube = [](float cx, float cy, float cz, float size, float r, float g, float b)
+    auto drawBox = [](float cx, float cy, float cz, float sx, float sy, float sz, float r, float g, float b)
     {
-        float hx = size * 0.5f;
+        float hx = sx * 0.5f;
+        float hy = sy * 0.5f;
+        float hz = sz * 0.5f;
         float x0 = cx - hx, x1 = cx + hx;
-        float y0 = cy - hx, y1 = cy + hx;
-        float z0 = cz - hx, z1 = cz + hx;
+        float y0 = cy - hy, y1 = cy + hy;
+        float z0 = cz - hz, z1 = cz + hz;
         glDisable(GL_TEXTURE_2D);
         glColor3f(r, g, b);
         glBegin(GL_QUADS);
@@ -1373,6 +1375,11 @@ void drawNpcBlocky(const NPC &npc)
         glEnd();
     };
 
+    auto drawColoredCube = [&](float cx, float cy, float cz, float size, float r, float g, float b)
+    {
+        drawBox(cx, cy, cz, size, size, size, r, g, b);
+    };
+
     auto drawHead = [&](float cx, float cy, float cz)
     {
         float hx = s * 0.5f;
@@ -1382,7 +1389,7 @@ void drawNpcBlocky(const NPC &npc)
 
         if (npc.texture == 0)
         {
-            drawColoredCube(cx, cy, cz, s, 0.9f, 0.9f, 0.9f);
+            drawColoredCube(cx, cy, cz, s, 0.0f, 0.0f, 0.0f);
             return;
         }
 
@@ -1432,7 +1439,7 @@ void drawNpcBlocky(const NPC &npc)
         glDisable(GL_TEXTURE_2D);
 
         glDisable(GL_TEXTURE_2D);
-        glColor3f(0.95f, 0.95f, 0.95f);
+        glColor3f(0.0f, 0.0f, 0.0f);
         glBegin(GL_QUADS);
         glVertex3f(x0, y1, z1);
         glVertex3f(x1, y1, z1);
@@ -1446,7 +1453,55 @@ void drawNpcBlocky(const NPC &npc)
         glEnd();
     };
 
-    drawHead(npc.x, baseY + s * 2.2f, npc.z);
-    drawColoredCube(npc.x, baseY + s * 0.8f, npc.z, s * 1.6f, 0.2f, 0.5f, 0.9f);
-    drawColoredCube(npc.x, baseY + s * 0.2f, npc.z, s * 0.6f, 0.2f, 0.5f, 0.9f);
+    // Palette
+    const std::array<float, 3> shirt{22.0f / 255.0f, 46.0f / 255.0f, 148.0f / 255.0f}; // blue torso/arms (RGB 22,46,148)
+    const std::array<float, 3> pants{0.1f, 0.12f, 0.2f};
+    const std::array<float, 3> shoes{0.05f, 0.05f, 0.05f};
+    const std::array<float, 3> skin{0.78f, 0.63f, 0.48f};
+
+    // Leg stack
+    float legH = s * 1.3f;
+    float legW = s * 0.55f;
+    float legD = s * 0.7f;
+    float shoeH = legH * 0.25f;
+    float legUpperH = legH - shoeH;
+
+    float legYOffset = baseY + legUpperH * 0.5f;
+    float legZ = npc.z;
+    float legXOff = legW * 0.7f;
+    // Upper legs
+    drawBox(npc.x - legXOff, legYOffset, legZ, legW, legUpperH, legD, pants[0], pants[1], pants[2]);
+    drawBox(npc.x + legXOff, legYOffset, legZ, legW, legUpperH, legD, pants[0], pants[1], pants[2]);
+    // Shoes
+    float shoeY = baseY + legUpperH + shoeH * 0.5f;
+    drawBox(npc.x - legXOff, shoeY, legZ, legW, shoeH, legD + s * 0.1f, shoes[0], shoes[1], shoes[2]);
+    drawBox(npc.x + legXOff, shoeY, legZ, legW, shoeH, legD + s * 0.1f, shoes[0], shoes[1], shoes[2]);
+
+    // Torso
+    float torsoH = s * 2.3f;
+    float torsoW = s * 1.4f;
+    float torsoD = s * 1.0f;
+    float torsoBaseY = baseY + legH;
+    float torsoCenterY = torsoBaseY + torsoH * 0.5f;
+    drawBox(npc.x, torsoCenterY, npc.z, torsoW, torsoH, torsoD, shirt[0], shirt[1], shirt[2]);
+    // Arms
+    float armH = torsoH * 0.9f;
+    float armW = s * 0.40f;
+    float armD = s * 0.55f;
+    float armY = torsoBaseY + armH * 0.5f;
+    float armXOff = torsoW * 0.5f + armW * 0.45f + s * 0.06f; // closer to torso while still avoiding z-fighting
+    drawBox(npc.x - armXOff, armY, npc.z, armW, armH, armD, shirt[0], shirt[1], shirt[2]);
+    drawBox(npc.x + armXOff, armY, npc.z, armW, armH, armD, shirt[0], shirt[1], shirt[2]);
+    // Hands
+    float handH = armH * 0.22f;
+    float handW = armW * 0.85f;
+    float handD = armD * 0.8f;
+    float handY = torsoBaseY - handH * 0.5f - s * 0.03f; // place hands just below arm to avoid coplanar faces
+    float handZOff = s * 0.08f;                          // slight Z offset to remove z-fighting with arm
+    drawBox(npc.x - armXOff, handY, npc.z + handZOff, handW, handH, handD, skin[0], skin[1], skin[2]);
+    drawBox(npc.x + armXOff, handY, npc.z + handZOff, handW, handH, handD, skin[0], skin[1], skin[2]);
+
+    // Head
+    float headY = torsoBaseY + torsoH + s * 0.6f;
+    drawHead(npc.x, headY, npc.z);
 }

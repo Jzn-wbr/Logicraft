@@ -1,4 +1,4 @@
-# SigmaCraft
+# Logicraft
 
 Petit projet C++/OpenGL/SDL2 géré via CMake et vcpkg. Les ressources (maps + images) restent à la racine pour simplifier l’exécution.
 
@@ -27,7 +27,7 @@ cmake --build build --config Release
 
 ## Lancer
 ```
-.\build\Release\sigmacraft.exe
+.\build\Release\logicraft.exe
 ```
 Le binaire détecte automatiquement la racine contenant `images/` et `maps/` même si vous lancez depuis un autre dossier.
 
