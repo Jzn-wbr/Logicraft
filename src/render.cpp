@@ -1355,6 +1355,12 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     color[1] = brightness;
                     color[2] = brightness;
                 }
+                else if (b == BlockType::Dirt)
+                {
+                    color[0] = brightness;
+                    color[1] = brightness;
+                    color[2] = brightness;
+                }
                 float emissive = 0.0f;
                 if (b == BlockType::Led && world.getPower(x, y, z))
                 {
