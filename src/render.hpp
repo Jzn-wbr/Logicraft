@@ -38,6 +38,7 @@ extern int gComparatorInRightTile;
 extern int gComparatorGtTile;
 extern int gComparatorEqTile;
 extern int gComparatorLtTile;
+extern int gGrassTopTile;
 extern const std::map<char, std::array<uint8_t, 5>> FONT5x4;
 extern const int MAX_STACK;
 extern const int INV_COLS;

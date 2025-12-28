@@ -39,6 +39,7 @@ int gComparatorGtTile = 0;
 int gComparatorEqTile = 0;
 int gComparatorLtTile = 0;
 int gClockTopTile = 0;
+int gGrassTopTile = 0;
 const int MAX_STACK = 64;
 const int INV_COLS = 7;
 const int INV_ROWS = 4;
@@ -170,6 +171,158 @@ void fillTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array
 
 void fillRect(std::vector<uint8_t> &pix, int texW, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b,
               uint8_t a);
+
+void fillWoodTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor)
+{
+    int tileX = tileIdx % ATLAS_COLS;
+    int tileY = tileIdx / ATLAS_COLS;
+    int x0 = tileX * ATLAS_TILE_SIZE;
+    int y0 = tileY * ATLAS_TILE_SIZE;
+
+    auto toByte = [](float v)
+    { return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f); };
+
+    int plankW = ATLAS_TILE_SIZE / 3;
+    int seam = 1;
+    float plankTint[3] = {0.03f, 0.0f, 0.06f};
+
+    for (int y = 0; y < ATLAS_TILE_SIZE; ++y)
+    {
+        for (int x = 0; x < ATLAS_TILE_SIZE; ++x)
+        {
+            int p = std::min(x / plankW, 2);
+            float tone = plankTint[p];
+            float n = hashNoise(x + p * 11, y * 2 + p * 19, 51);
+            float grain = 0.08f * std::sin((y * 0.6f + n * 5.5f));
+            float shade = 0.7f + grain + tone;
+
+            float r = baseColor[0] * shade;
+            float g = baseColor[1] * shade;
+            float b = baseColor[2] * shade;
+            writePixel(pix, texW, x0 + x, y0 + y, toByte(r), toByte(g), toByte(b), 255);
+        }
+    }
+
+    uint8_t seamR = toByte(baseColor[0] * 0.45f);
+    uint8_t seamG = toByte(baseColor[1] * 0.45f);
+    uint8_t seamB = toByte(baseColor[2] * 0.45f);
+    fillRect(pix, texW, x0 + plankW - seam, y0, seam, ATLAS_TILE_SIZE, seamR, seamG, seamB, 255);
+    fillRect(pix, texW, x0 + 2 * plankW - seam, y0, seam, ATLAS_TILE_SIZE, seamR, seamG, seamB, 255);
+
+    auto drawKnot = [&](int cx, int cy, int radius)
+    {
+        for (int y = -radius; y <= radius; ++y)
+        {
+            for (int x = -radius; x <= radius; ++x)
+            {
+                float d2 = static_cast<float>(x * x + y * y);
+                if (d2 > radius * radius)
+                    continue;
+                float ring = std::clamp((radius * radius - d2) / (radius * radius), 0.0f, 1.0f);
+                float rim = std::sin((1.0f - ring) * 3.1415926f);
+                float dark = 0.45f + (1.0f - ring) * 0.18f;
+                float light = 0.65f + rim * 0.2f;
+                int px = cx + x;
+                int py = cy + y;
+                if (px < 0 || px >= ATLAS_TILE_SIZE || py < 0 || py >= ATLAS_TILE_SIZE)
+                    continue;
+                float blend = ring * 0.7f + 0.3f;
+                uint8_t r = toByte(baseColor[0] * (dark * blend + light * (1.0f - blend)));
+                uint8_t g = toByte(baseColor[1] * (dark * blend + light * (1.0f - blend)));
+                uint8_t b = toByte(baseColor[2] * (dark * blend + light * (1.0f - blend)));
+                writePixel(pix, texW, x0 + px, y0 + py, r, g, b, 255);
+            }
+        }
+    };
+
+    drawKnot(plankW / 2, ATLAS_TILE_SIZE / 3, 4);
+    drawKnot(plankW + plankW / 2 + 2, ATLAS_TILE_SIZE * 2 / 3, 3);
+}
+
+void fillGrassSideTile(std::vector<uint8_t> &pix, int texW, int tileIdx, int dirtTileIdx,
+                       const std::array<float, 3> &grassColor, const std::array<float, 3> &dirtColor)
+{
+    int tileX = tileIdx % ATLAS_COLS;
+    int tileY = tileIdx / ATLAS_COLS;
+    int x0 = tileX * ATLAS_TILE_SIZE;
+    int y0 = tileY * ATLAS_TILE_SIZE;
+    int bandH = std::max(2, static_cast<int>(ATLAS_TILE_SIZE * 0.2f));
+
+    auto toByte = [](float v)
+    { return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f); };
+
+    auto sample = [&](const std::array<float, 3> &baseColor, int styleSeed, int tileSeed, int x, int y)
+    {
+        float n = hashNoise(x, y + tileSeed * 17, styleSeed);
+        float shade = 0.85f + n * 0.25f;
+        if ((styleSeed % 3 == 0) && (y % 8 == 0))
+            shade *= 0.92f;
+        if ((styleSeed % 4 == 1) && (x % 6 == 0))
+            shade *= 0.9f;
+        float r = std::clamp(baseColor[0] * shade, 0.0f, 1.0f);
+        float g = std::clamp(baseColor[1] * shade, 0.0f, 1.0f);
+        float b = std::clamp(baseColor[2] * shade, 0.0f, 1.0f);
+        return std::array<float, 3>{r, g, b};
+    };
+
+    for (int y = 0; y < ATLAS_TILE_SIZE; ++y)
+    {
+        bool isGrass = (y < bandH);
+        float mix = (y == bandH || y == bandH - 1) ? 0.5f : (isGrass ? 1.0f : 0.0f);
+        for (int x = 0; x < ATLAS_TILE_SIZE; ++x)
+        {
+            auto grass = sample(grassColor, 3, tileIdx, x, y);
+            auto dirt = sample(dirtColor, 4, dirtTileIdx, x, y);
+            float r = dirt[0] * (1.0f - mix) + grass[0] * mix;
+            float g = dirt[1] * (1.0f - mix) + grass[1] * mix;
+            float b = dirt[2] * (1.0f - mix) + grass[2] * mix;
+            writePixel(pix, texW, x0 + x, y0 + y, toByte(r), toByte(g), toByte(b), 255);
+        }
+    }
+}
+
+void fillStoneBrickTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor)
+{
+    int tileX = tileIdx % ATLAS_COLS;
+    int tileY = tileIdx / ATLAS_COLS;
+    int x0 = tileX * ATLAS_TILE_SIZE;
+    int y0 = tileY * ATLAS_TILE_SIZE;
+
+    auto toByte = [](float v)
+    { return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f); };
+
+    const int brickH = 6;
+    const int mortar = 1;
+    uint8_t mortarR = toByte(baseColor[0] * 0.8f);
+    uint8_t mortarG = toByte(baseColor[1] * 0.8f);
+    uint8_t mortarB = toByte(baseColor[2] * 0.8f);
+
+    for (int y = 0; y < ATLAS_TILE_SIZE; ++y)
+    {
+        int row = y / brickH;
+        int yIn = y % brickH;
+        bool mortarRow = (yIn == brickH - 1);
+        int rowOffset = (row % 2) ? (brickH / 2) : 0;
+        for (int x = 0; x < ATLAS_TILE_SIZE; ++x)
+        {
+            int xShift = (x + rowOffset) % ATLAS_TILE_SIZE;
+            int xIn = xShift % brickH;
+            bool mortarCol = (xIn == brickH - 1);
+            if (mortarRow || mortarCol)
+            {
+                writePixel(pix, texW, x0 + x, y0 + y, mortarR, mortarG, mortarB, 255);
+                continue;
+            }
+
+            float n = hashNoise(x + row * 13, y + row * 7, 61);
+            float shade = 1.0f + n * 0.05f;
+            float r = baseColor[0] * shade;
+            float g = baseColor[1] * shade;
+            float b = baseColor[2] * shade;
+            writePixel(pix, texW, x0 + x, y0 + y, toByte(r), toByte(g), toByte(b), 255);
+        }
+    }
+}
 
 void fillWireTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor)
 {
@@ -737,6 +890,7 @@ void createAtlasTexture()
                   {BlockType::Clock, 26}};
 
     int nextTile = static_cast<int>(gBlockTile.size());
+    gGrassTopTile = nextTile++;
     gAndTopTile = nextTile++;
     gOrTopTile = nextTile++;
     gNotTopTile = nextTile++;
@@ -768,7 +922,7 @@ void createAtlasTexture()
     int maxTileIdx = 0;
     for (const auto &kv : gBlockTile)
         maxTileIdx = std::max(maxTileIdx, kv.second);
-    maxTileIdx = std::max(maxTileIdx, std::max(std::max(gAndTopTile, gOrTopTile), gXorTopTile));
+    maxTileIdx = std::max(maxTileIdx, std::max(std::max(gGrassTopTile, gAndTopTile), std::max(gOrTopTile, gXorTopTile)));
     maxTileIdx = std::max(maxTileIdx,
                           std::max(std::max(gDffTopTile, gAddTopTile), std::max(gAddBottomTile, gAddBackTile)));
     maxTileIdx = std::max(maxTileIdx, gCounterTopTile);
@@ -795,10 +949,12 @@ void createAtlasTexture()
     auto base = [&](BlockType b)
     { return BLOCKS.at(b).color; };
 
-    fillTile(pixels, texW, gBlockTile[BlockType::Grass], {0.2f, 0.8f, 0.25f}, 3);
+    fillGrassSideTile(pixels, texW, gBlockTile[BlockType::Grass], gBlockTile[BlockType::Dirt], {0.16f, 0.42f, 0.18f},
+                      base(BlockType::Dirt));
+    fillTile(pixels, texW, gGrassTopTile, {0.16f, 0.42f, 0.18f}, 3);
     fillTile(pixels, texW, gBlockTile[BlockType::Dirt], base(BlockType::Dirt), 4);
-    fillTile(pixels, texW, gBlockTile[BlockType::Stone], base(BlockType::Stone), 7);
-    fillTile(pixels, texW, gBlockTile[BlockType::Wood], base(BlockType::Wood), 1);
+    fillStoneBrickTile(pixels, texW, gBlockTile[BlockType::Stone], base(BlockType::Stone));
+    fillWoodTile(pixels, texW, gBlockTile[BlockType::Wood], base(BlockType::Wood));
     fillTile(pixels, texW, gBlockTile[BlockType::Leaves], base(BlockType::Leaves), 5);
     fillTile(pixels, texW, gBlockTile[BlockType::Water], base(BlockType::Water), 99);
     fillTile(pixels, texW, gBlockTile[BlockType::Plank], base(BlockType::Plank), 0);
@@ -1193,6 +1349,12 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                 color[0] *= brightness;
                 color[1] *= brightness;
                 color[2] *= brightness;
+                if (b == BlockType::Grass)
+                {
+                    color[0] = brightness;
+                    color[1] = brightness;
+                    color[2] = brightness;
+                }
                 float emissive = 0.0f;
                 if (b == BlockType::Led && world.getPower(x, y, z))
                 {
@@ -1237,6 +1399,10 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                 {
                     (void)nx;
                     (void)nz;
+                    if (ny == 1 && b == BlockType::Grass)
+                        return gGrassTopTile;
+                    if (ny == -1 && b == BlockType::Grass)
+                        return gBlockTile[BlockType::Dirt];
                     if (ny == 1)
                     {
                         if (b == BlockType::AndGate)

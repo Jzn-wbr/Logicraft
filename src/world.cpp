@@ -10,8 +10,8 @@ void markChunkFromBlock(int x, int y, int z);
 const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Air, {"Air", false, {0.7f, 0.85f, 1.0f}}},
     {BlockType::Grass, {"Grass", true, {0.2f, 0.7f, 0.2f}}},
-    {BlockType::Dirt, {"Dirt", true, {0.45f, 0.25f, 0.1f}}},
-    {BlockType::Stone, {"Stone", true, {0.5f, 0.5f, 0.5f}}},
+    {BlockType::Dirt, {"Dirt", true, {0.62f, 0.4f, 0.22f}}},
+    {BlockType::Stone, {"Stone", true, {0.78f, 0.78f, 0.78f}}},
     {BlockType::Wood, {"Wood", true, {0.8f, 0.65f, 0.45f}}},
     {BlockType::Leaves, {"Leaves", true, {0.25f, 0.6f, 0.25f}}},
     {BlockType::Water, {"Water", false, {0.2f, 0.4f, 0.9f}}},
