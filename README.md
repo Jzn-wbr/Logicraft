@@ -31,13 +31,13 @@ Highlights:
 - Grass, Dirt, Stone, Wood, Leaves
 - Water, Plank, Sand, Glass
 
-## Play (Windows) - players only
-If you have the installer:
-- Run the `Logicraft-*.exe` installer.
+## Play (Windows 64) - players only
+- Get the Windows installer from the GitHub Releases page. You only need the `.exe`.
+  
+  ![github realeases](images/releases.png)
+  
+- Run the `Logicraft-...-win64.exe` installer.
 - Launch from the Start Menu or the desktop shortcut.
-
-If you only have a build folder:
-- Run `logicraft.exe` next to `images/`, `maps/`, and `config.cfg`.
 
 ## Controls (Players)
 - Mouse: look around
