@@ -168,6 +168,37 @@ void fillTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array
     }
 }
 
+void fillRect(std::vector<uint8_t> &pix, int texW, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+              uint8_t a);
+
+void fillWireTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor)
+{
+    int tileX = tileIdx % ATLAS_COLS;
+    int tileY = tileIdx / ATLAS_COLS;
+    int x0 = tileX * ATLAS_TILE_SIZE;
+    int y0 = tileY * ATLAS_TILE_SIZE;
+
+    auto toByte = [](float v)
+    { return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f); };
+
+    for (int y = 0; y < ATLAS_TILE_SIZE; ++y)
+    {
+        for (int x = 0; x < ATLAS_TILE_SIZE; ++x)
+        {
+            float n = hashNoise(x, y + tileIdx * 13, 43);
+            float grain = (hashNoise(x * 3, y * 3 + 7, 91) - 0.5f) * 0.05f;
+            float stripe = ((x + y) % 9 == 0) ? 0.025f : 0.0f;
+            float xNorm = static_cast<float>(x) / static_cast<float>(ATLAS_TILE_SIZE - 1);
+            float highlight = 0.06f * (0.5f + 0.5f * std::cos((xNorm - 0.35f) * 3.1415926f));
+            float shade = 0.3f + n * 0.08f + grain + stripe + highlight;
+            float r = baseColor[0] * shade;
+            float g = baseColor[1] * shade;
+            float b = baseColor[2] * shade;
+            writePixel(pix, texW, x0 + x, y0 + y, toByte(r), toByte(g), toByte(b), 255);
+        }
+    }
+}
+
 int tinyTextWidthOnTile(const std::string &text, int scale)
 {
     if (text.empty())
@@ -782,7 +813,7 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Counter], base(BlockType::Counter), 12);
     fillTile(pixels, texW, gBlockTile[BlockType::Led], base(BlockType::Led), 17);
     fillTile(pixels, texW, gBlockTile[BlockType::Button], base(BlockType::Button), 18);
-    fillTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire), 19);
+    fillWireTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire));
     fillTile(pixels, texW, gBlockTile[BlockType::NotGate], base(BlockType::NotGate), 20);
     fillTile(pixels, texW, gBlockTile[BlockType::Sign], base(BlockType::Sign), 1);
     fillTile(pixels, texW, gBlockTile[BlockType::Splitter], base(BlockType::Splitter), 22);
@@ -859,8 +890,43 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
     int y1 = std::min(world.getHeight(), y0 + CHUNK_SIZE);
     int z1 = std::min(world.getDepth(), z0 + CHUNK_SIZE);
 
+    const float lightX = -0.45f;
+    const float lightY = 0.85f;
+    const float lightZ = -0.35f;
+    const float lightLen = std::sqrt(lightX * lightX + lightY * lightY + lightZ * lightZ);
+    const float lx = lightX / lightLen;
+    const float ly = lightY / lightLen;
+    const float lz = lightZ / lightLen;
+
+    auto occludesAt = [&](int ox, int oy, int oz)
+    {
+        if (!world.inside(ox, oy, oz))
+            return false;
+        return occludesFaces(world.get(ox, oy, oz));
+    };
+
+    auto aoFactor = [&](bool side1, bool side2, bool corner)
+    {
+        int occ = (side1 && side2) ? 3 : (static_cast<int>(side1) + static_cast<int>(side2) + static_cast<int>(corner));
+        float ao = 1.0f - static_cast<float>(occ) * 0.18f;
+        return std::clamp(ao, 0.5f, 1.0f);
+    };
+
+    auto faceLight = [&](int nx, int ny, int nz, float emissive)
+    {
+        float dot = nx * lx + ny * ly + nz * lz;
+        float wrap = std::clamp(dot * 0.6f + 0.4f, 0.0f, 1.0f);
+        float light = 0.35f + 0.65f * wrap;
+        if (ny == 1)
+            light *= 1.05f;
+        else if (ny == -1)
+            light *= 0.92f;
+        light += emissive;
+        return std::clamp(light, 0.2f, 1.2f);
+    };
+
     auto addFace = [&](int x, int y, int z, const int nx, const int ny, const int nz, const std::array<float, 3> &col,
-                       int tile, bool toGlass)
+                       int tile, float emissive, bool toGlass)
     {
         auto &vec = toGlass ? mesh.glassVerts : mesh.verts;
         float bx = static_cast<float>(x);
@@ -869,6 +935,7 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
         float br = col[0];
         float bg = col[1];
         float bb = col[2];
+        float baseLight = faceLight(nx, ny, nz, emissive);
 
         float du = 1.0f / ATLAS_COLS;
         float dv = 1.0f / ATLAS_ROWS;
@@ -880,50 +947,125 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
         float u1 = (tx + 1) * du - pad;
         float v1 = (ty + 1) * dv - pad;
 
-        auto push = [&](float px, float py, float pz, float u, float v)
-        { vec.push_back(Vertex{px, py, pz, u, v, br, bg, bb}); };
+        auto applyAo = [&](float ao)
+        {
+            if (toGlass)
+                return 0.75f + 0.25f * ao;
+            return ao;
+        };
+
+        auto push = [&](float px, float py, float pz, float u, float v, float shade)
+        {
+            float r = std::clamp(br * shade, 0.0f, 1.0f);
+            float g = std::clamp(bg * shade, 0.0f, 1.0f);
+            float b = std::clamp(bb * shade, 0.0f, 1.0f);
+            vec.push_back(Vertex{px, py, pz, u, v, r, g, b});
+        };
+
+        auto sideDelta = [](int offset)
+        { return offset == 1 ? 0 : -1; };
+
+        auto aoForX = [&](int vy, int vz, int planeX)
+        {
+            int ySide = sideDelta(vy);
+            int zSide = sideDelta(vz);
+            bool side1 = occludesAt(planeX, y + vy + ySide, z + vz);
+            bool side2 = occludesAt(planeX, y + vy, z + vz + zSide);
+            bool corner = occludesAt(planeX, y + vy + ySide, z + vz + zSide);
+            return aoFactor(side1, side2, corner);
+        };
+
+        auto aoForY = [&](int vx, int vz, int planeY)
+        {
+            int xSide = sideDelta(vx);
+            int zSide = sideDelta(vz);
+            bool side1 = occludesAt(x + vx + xSide, planeY, z + vz);
+            bool side2 = occludesAt(x + vx, planeY, z + vz + zSide);
+            bool corner = occludesAt(x + vx + xSide, planeY, z + vz + zSide);
+            return aoFactor(side1, side2, corner);
+        };
+
+        auto aoForZ = [&](int vx, int vy, int planeZ)
+        {
+            int xSide = sideDelta(vx);
+            int ySide = sideDelta(vy);
+            bool side1 = occludesAt(x + vx + xSide, y + vy, planeZ);
+            bool side2 = occludesAt(x + vx, y + vy + ySide, planeZ);
+            bool corner = occludesAt(x + vx + xSide, y + vy + ySide, planeZ);
+            return aoFactor(side1, side2, corner);
+        };
 
         if (nx == 1)
         {
-            push(bx + 1, by, bz, u1, v1);
-            push(bx + 1, by + 1, bz, u1, v0);
-            push(bx + 1, by + 1, bz + 1, u0, v0);
-            push(bx + 1, by, bz + 1, u0, v1);
+            int planeX = x + 1;
+            float ao00 = applyAo(aoForX(0, 0, planeX));
+            float ao10 = applyAo(aoForX(1, 0, planeX));
+            float ao11 = applyAo(aoForX(1, 1, planeX));
+            float ao01 = applyAo(aoForX(0, 1, planeX));
+            push(bx + 1, by, bz, u1, v1, baseLight * ao00);
+            push(bx + 1, by + 1, bz, u1, v0, baseLight * ao10);
+            push(bx + 1, by + 1, bz + 1, u0, v0, baseLight * ao11);
+            push(bx + 1, by, bz + 1, u0, v1, baseLight * ao01);
         }
         else if (nx == -1)
         {
-            push(bx, by, bz, u1, v1);
-            push(bx, by, bz + 1, u0, v1);
-            push(bx, by + 1, bz + 1, u0, v0);
-            push(bx, by + 1, bz, u1, v0);
+            int planeX = x - 1;
+            float ao00 = applyAo(aoForX(0, 0, planeX));
+            float ao01 = applyAo(aoForX(0, 1, planeX));
+            float ao11 = applyAo(aoForX(1, 1, planeX));
+            float ao10 = applyAo(aoForX(1, 0, planeX));
+            push(bx, by, bz, u1, v1, baseLight * ao00);
+            push(bx, by, bz + 1, u0, v1, baseLight * ao01);
+            push(bx, by + 1, bz + 1, u0, v0, baseLight * ao11);
+            push(bx, by + 1, bz, u1, v0, baseLight * ao10);
         }
         else if (ny == 1)
         {
-            push(bx, by + 1, bz, u1, v1);
-            push(bx + 1, by + 1, bz, u0, v1);
-            push(bx + 1, by + 1, bz + 1, u0, v0);
-            push(bx, by + 1, bz + 1, u1, v0);
+            int planeY = y + 1;
+            float ao00 = applyAo(aoForY(0, 0, planeY));
+            float ao10 = applyAo(aoForY(1, 0, planeY));
+            float ao11 = applyAo(aoForY(1, 1, planeY));
+            float ao01 = applyAo(aoForY(0, 1, planeY));
+            push(bx, by + 1, bz, u1, v1, baseLight * ao00);
+            push(bx + 1, by + 1, bz, u0, v1, baseLight * ao10);
+            push(bx + 1, by + 1, bz + 1, u0, v0, baseLight * ao11);
+            push(bx, by + 1, bz + 1, u1, v0, baseLight * ao01);
         }
         else if (ny == -1)
         {
-            push(bx, by, bz, u1, v1);
-            push(bx + 1, by, bz, u0, v1);
-            push(bx + 1, by, bz + 1, u0, v0);
-            push(bx, by, bz + 1, u1, v0);
+            int planeY = y - 1;
+            float ao00 = applyAo(aoForY(0, 0, planeY));
+            float ao10 = applyAo(aoForY(1, 0, planeY));
+            float ao11 = applyAo(aoForY(1, 1, planeY));
+            float ao01 = applyAo(aoForY(0, 1, planeY));
+            push(bx, by, bz, u1, v1, baseLight * ao00);
+            push(bx + 1, by, bz, u0, v1, baseLight * ao10);
+            push(bx + 1, by, bz + 1, u0, v0, baseLight * ao11);
+            push(bx, by, bz + 1, u1, v0, baseLight * ao01);
         }
         else if (nz == 1)
         {
-            push(bx, by, bz + 1, u1, v1);
-            push(bx + 1, by, bz + 1, u0, v1);
-            push(bx + 1, by + 1, bz + 1, u0, v0);
-            push(bx, by + 1, bz + 1, u1, v0);
+            int planeZ = z + 1;
+            float ao00 = applyAo(aoForZ(0, 0, planeZ));
+            float ao10 = applyAo(aoForZ(1, 0, planeZ));
+            float ao11 = applyAo(aoForZ(1, 1, planeZ));
+            float ao01 = applyAo(aoForZ(0, 1, planeZ));
+            push(bx, by, bz + 1, u1, v1, baseLight * ao00);
+            push(bx + 1, by, bz + 1, u0, v1, baseLight * ao10);
+            push(bx + 1, by + 1, bz + 1, u0, v0, baseLight * ao11);
+            push(bx, by + 1, bz + 1, u1, v0, baseLight * ao01);
         }
         else if (nz == -1)
         {
-            push(bx, by, bz, u1, v1);
-            push(bx, by + 1, bz, u1, v0);
-            push(bx + 1, by + 1, bz, u0, v0);
-            push(bx + 1, by, bz, u0, v1);
+            int planeZ = z - 1;
+            float ao00 = applyAo(aoForZ(0, 0, planeZ));
+            float ao01 = applyAo(aoForZ(0, 1, planeZ));
+            float ao11 = applyAo(aoForZ(1, 1, planeZ));
+            float ao10 = applyAo(aoForZ(1, 0, planeZ));
+            push(bx, by, bz, u1, v1, baseLight * ao00);
+            push(bx, by + 1, bz, u1, v0, baseLight * ao01);
+            push(bx + 1, by + 1, bz, u0, v0, baseLight * ao11);
+            push(bx + 1, by, bz, u0, v1, baseLight * ao10);
         }
     };
     auto addBox = [&](float minX, float minY, float minZ, float maxX, float maxY, float maxZ, const std::array<float, 3> &col,
@@ -975,6 +1117,67 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
         push(maxX, maxY, minZ, u0, v0);
         push(maxX, minY, minZ, u0, v1);
     };
+    auto addWireBox = [&](float minX, float minY, float minZ, float maxX, float maxY, float maxZ,
+                          const std::array<float, 3> &col, int tile, float emissive)
+    {
+        float br = col[0];
+        float bg = col[1];
+        float bb = col[2];
+        float du = 1.0f / ATLAS_COLS;
+        float dv = 1.0f / ATLAS_ROWS;
+        int tx = tile % ATLAS_COLS;
+        int ty = tile / ATLAS_COLS;
+        const float pad = 0.0015f;
+        float u0 = tx * du + pad;
+        float v0 = ty * dv + pad;
+        float u1 = (tx + 1) * du - pad;
+        float v1 = (ty + 1) * dv - pad;
+
+        auto push = [&](float px, float py, float pz, float u, float v, float shade)
+        {
+            float r = std::clamp(br * shade, 0.0f, 1.0f);
+            float g = std::clamp(bg * shade, 0.0f, 1.0f);
+            float b = std::clamp(bb * shade, 0.0f, 1.0f);
+            mesh.verts.push_back(Vertex{px, py, pz, u, v, r, g, b});
+        };
+
+        float sPX = faceLight(1, 0, 0, emissive);
+        float sNX = faceLight(-1, 0, 0, emissive);
+        float sPY = faceLight(0, 1, 0, emissive);
+        float sNY = faceLight(0, -1, 0, emissive);
+        float sPZ = faceLight(0, 0, 1, emissive);
+        float sNZ = faceLight(0, 0, -1, emissive);
+
+        push(maxX, minY, minZ, u1, v1, sPX);
+        push(maxX, maxY, minZ, u1, v0, sPX);
+        push(maxX, maxY, maxZ, u0, v0, sPX);
+        push(maxX, minY, maxZ, u0, v1, sPX);
+
+        push(minX, minY, minZ, u1, v1, sNX);
+        push(minX, minY, maxZ, u0, v1, sNX);
+        push(minX, maxY, maxZ, u0, v0, sNX);
+        push(minX, maxY, minZ, u1, v0, sNX);
+
+        push(minX, maxY, minZ, u1, v1, sPY);
+        push(maxX, maxY, minZ, u0, v1, sPY);
+        push(maxX, maxY, maxZ, u0, v0, sPY);
+        push(minX, maxY, maxZ, u1, v0, sPY);
+
+        push(minX, minY, minZ, u1, v1, sNY);
+        push(maxX, minY, minZ, u0, v1, sNY);
+        push(maxX, minY, maxZ, u0, v0, sNY);
+        push(minX, minY, maxZ, u1, v0, sNY);
+
+        push(minX, minY, maxZ, u1, v1, sPZ);
+        push(maxX, minY, maxZ, u0, v1, sPZ);
+        push(maxX, maxY, maxZ, u0, v0, sPZ);
+        push(minX, maxY, maxZ, u1, v0, sPZ);
+
+        push(minX, minY, minZ, u1, v1, sNZ);
+        push(minX, maxY, minZ, u1, v0, sNZ);
+        push(maxX, maxY, minZ, u0, v0, sNZ);
+        push(maxX, minY, minZ, u0, v1, sNZ);
+    };
 
     for (int y = y0; y < y1; ++y)
     {
@@ -990,11 +1193,13 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                 color[0] *= brightness;
                 color[1] *= brightness;
                 color[2] *= brightness;
+                float emissive = 0.0f;
                 if (b == BlockType::Led && world.getPower(x, y, z))
                 {
                     color[0] = std::min(color[0] * 1.6f, 1.0f);
                     color[1] = std::min(color[1] * 1.4f, 1.0f);
                     color[2] = std::min(color[2] * 1.1f, 1.0f);
+                    emissive = 0.25f;
                 }
                 else if (b == BlockType::Led)
                 {
@@ -1005,15 +1210,17 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                 }
                 else if (b == BlockType::Wire && world.getPower(x, y, z))
                 {
-                    color[0] = std::min(color[0] + 0.3f, 1.0f);
-                    color[1] = std::min(color[1] + 0.05f, 1.0f);
-                    color[2] = std::min(color[2] + 0.05f, 1.0f);
+                    color[0] = std::min(color[0] * 0.7f + 0.35f, 1.0f);
+                    color[1] = std::min(color[1] * 0.7f + 0.55f, 1.0f);
+                    color[2] = std::min(color[2] * 0.7f + 0.75f, 1.0f);
+                    emissive = 0.6f;
                 }
                 else if (b == BlockType::DFlipFlop && world.getPower(x, y, z))
                 {
                     color[0] = std::min(color[0] + 0.16f, 1.0f);
                     color[1] = std::min(color[1] + 0.08f, 1.0f);
                     color[2] = std::min(color[2] + 0.08f, 1.0f);
+                    emissive = 0.08f;
                 }
                 else if (b == BlockType::AddGate)
                 {
@@ -1200,23 +1407,27 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     float cz = static_cast<float>(z) + 0.5f;
                     const float half = 0.12f;
                     const float margin = 0.04f;
+                    const float join = 0.002f;
 
-                    addBox(cx - half, cy - half, cz - half, cx + half, cy + half, cz + half, color, tIdx);
+                    addWireBox(cx - half, cy - half, cz - half, cx + half, cy + half, cz + half, color, tIdx, emissive);
                     if (connects(1, 0, 0))
-                        addBox(cx, cy - half, cz - half, static_cast<float>(x + 1) - margin, cy + half, cz + half, color,
-                               tIdx);
+                        addWireBox(cx + join, cy - half, cz - half, static_cast<float>(x + 1) - margin, cy + half, cz + half,
+                                   color, tIdx, emissive);
                     if (connects(-1, 0, 0))
-                        addBox(static_cast<float>(x) + margin, cy - half, cz - half, cx, cy + half, cz + half, color, tIdx);
+                        addWireBox(static_cast<float>(x) + margin, cy - half, cz - half, cx - join, cy + half, cz + half, color,
+                                   tIdx, emissive);
                     if (connects(0, 1, 0))
-                        addBox(cx - half, cy, cz - half, cx + half, static_cast<float>(y + 1) - margin, cz + half, color,
-                               tIdx);
+                        addWireBox(cx - half, cy + join, cz - half, cx + half, static_cast<float>(y + 1) - margin, cz + half,
+                                   color, tIdx, emissive);
                     if (connects(0, -1, 0))
-                        addBox(cx - half, static_cast<float>(y) + margin, cz - half, cx + half, cy, cz + half, color, tIdx);
+                        addWireBox(cx - half, static_cast<float>(y) + margin, cz - half, cx + half, cy - join, cz + half, color,
+                                   tIdx, emissive);
                     if (connects(0, 0, 1))
-                        addBox(cx - half, cy - half, cz, cx + half, cy + half, static_cast<float>(z + 1) - margin, color,
-                               tIdx);
+                        addWireBox(cx - half, cy - half, cz + join, cx + half, cy + half, static_cast<float>(z + 1) - margin,
+                                   color, tIdx, emissive);
                     if (connects(0, 0, -1))
-                        addBox(cx - half, cy - half, static_cast<float>(z) + margin, cx + half, cy + half, cz, color, tIdx);
+                        addWireBox(cx - half, cy - half, static_cast<float>(z) + margin, cx + half, cy + half, cz - join, color,
+                                   tIdx, emissive);
                     continue;
                 }
 
@@ -1397,20 +1608,20 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                 };
 
                 if (x == 0 || (!occludesFaces(world.get(x - 1, y, z)) && !(isGlass && neighborIsGlass(x - 1, y, z))))
-                    addFace(x, y, z, -1, 0, 0, color, faceTile(-1, 0, 0), isGlass);
+                    addFace(x, y, z, -1, 0, 0, color, faceTile(-1, 0, 0), emissive, isGlass);
                 if (x == world.getWidth() - 1 ||
                     (!occludesFaces(world.get(x + 1, y, z)) && !(isGlass && neighborIsGlass(x + 1, y, z))))
-                    addFace(x, y, z, 1, 0, 0, color, faceTile(1, 0, 0), isGlass);
+                    addFace(x, y, z, 1, 0, 0, color, faceTile(1, 0, 0), emissive, isGlass);
                 if (y == 0 || (!occludesFaces(world.get(x, y - 1, z)) && !(isGlass && neighborIsGlass(x, y - 1, z))))
-                    addFace(x, y, z, 0, -1, 0, color, faceTile(0, -1, 0), isGlass);
+                    addFace(x, y, z, 0, -1, 0, color, faceTile(0, -1, 0), emissive, isGlass);
                 if (y == world.getHeight() - 1 ||
                     (!occludesFaces(world.get(x, y + 1, z)) && !(isGlass && neighborIsGlass(x, y + 1, z))))
-                    addFace(x, y, z, 0, 1, 0, color, faceTile(0, 1, 0), isGlass);
+                    addFace(x, y, z, 0, 1, 0, color, faceTile(0, 1, 0), emissive, isGlass);
                 if (z == 0 || (!occludesFaces(world.get(x, y, z - 1)) && !(isGlass && neighborIsGlass(x, y, z - 1))))
-                    addFace(x, y, z, 0, 0, -1, color, faceTile(0, 0, -1), isGlass);
+                    addFace(x, y, z, 0, 0, -1, color, faceTile(0, 0, -1), emissive, isGlass);
                 if (z == world.getDepth() - 1 ||
                     (!occludesFaces(world.get(x, y, z + 1)) && !(isGlass && neighborIsGlass(x, y, z + 1))))
-                    addFace(x, y, z, 0, 0, 1, color, faceTile(0, 0, 1), isGlass);
+                    addFace(x, y, z, 0, 0, 1, color, faceTile(0, 0, 1), emissive, isGlass);
             }
         }
     }

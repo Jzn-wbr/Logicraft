@@ -27,7 +27,7 @@ const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Counter, {"Counter", true, {0.8f, 0.8f, 0.25f}}},
     {BlockType::Led, {"LED", true, {0.95f, 0.9f, 0.2f}}},
     {BlockType::Button, {"Button", true, {0.6f, 0.2f, 0.2f}}},
-    {BlockType::Wire, {"Wire", true, {0.55f, 0.55f, 0.58f}}},
+    {BlockType::Wire, {"Wire", true, {0.55f, 0.57f, 0.6f}}},
     {BlockType::Sign, {"Sign", false, {0.85f, 0.7f, 0.45f}}},
     {BlockType::Splitter, {"Splitter", true, {0.2f, 0.75f, 0.7f}}},
     {BlockType::Merger, {"Merger", true, {0.75f, 0.4f, 0.85f}}},
