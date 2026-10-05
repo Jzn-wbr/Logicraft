@@ -1,82 +1,114 @@
-# Logicraft
+<p align="center">
+  <img src="images/logicraft.ico" alt="Logo Logicraft" width="128">
+</p>
 
-Logicraft is a 3D sandbox for building digital circuits. Place wires and logic blocks, watch signals move through your builds, and turn ideas into working machines.
+<h1 align="center">Logicraft</h1>
 
-![7-segment counter circuit](images/7seg-counter.png)
+<p align="center">
+  <strong>Construisez vos circuits. Donnez vie à vos idées.</strong><br>
+  Un bac à sable 3D où l’électronique devient un terrain de jeu.
+</p>
 
-Highlights:
-- Build real logic systems with visual feedback.
-- Mix architecture blocks with electronics to make readable machines.
-- Included example map: `maps/syslog.bulldog` (logic circuits + a 7-segment counter).
+<p align="center">
+  <a href="#installation">Jouer</a> ·
+  <a href="#ce-que-vous-pouvez-créer">Créer</a> ·
+  <a href="#contribuer">Contribuer</a>
+</p>
 
-## What you can build
-- Counters, clocks, and timers
-- Combinational logic (adders, decoders, muxes)
-- Visual gadgets (LED readouts, 7-seg displays)
+![Circuit compteur 7 segments dans Logicraft](images/7seg-counter.png)
 
-## Logic blocks
+## Imaginez. Construisez. Testez.
 
-![all blocks available](images/blocks.png)
+Logicraft est un jeu de construction 3D dédié aux circuits numériques. Assemblez des portes logiques, faites circuler les signaux et transformez vos idées en machines fonctionnelles — le tout dans un monde que vous pouvez façonner bloc par bloc.
 
-- Wires, Button, LED, Sign
-- AND, OR, NOT, XOR
-- D Flip-Flop
-- Adder
-- Splitter, Merger
-- Decoder, Multiplexer
-- Comparator
-- Clock
+Que vous souhaitiez comprendre les bases de la logique numérique ou concevoir des systèmes ambitieux, Logicraft vous donne les briques pour expérimenter librement, observer instantanément le résultat et apprendre en construisant.
 
-## World blocks
-- Grass, Dirt, Stone, Wood, Leaves
-- Water, Plank, Sand, Glass
+## Pourquoi Logicraft ?
 
-## Play (Windows 64) - players only
-- Get the Windows installer from the GitHub Releases page. You only need the `.exe`.
-  
-  ![github realeases](images/releases.png)
-  
-- Run the `Logicraft-...-win64.exe` installer.
-- Launch from the Start Menu or the desktop shortcut.
+- **Une électronique concrète** : voyez les signaux se propager et comprenez chaque étape du circuit.
+- **Une liberté de construction** : mélangez architecture, décoration et logique pour créer des machines lisibles et originales.
+- **Un terrain d’expérimentation** : testez, modifiez et recommencez sans limite.
+- **Des exemples prêts à explorer** : découvrez la carte `maps/syslog.bulldog`, avec plusieurs circuits et un compteur à 7 segments.
 
-## Controls (Players)
-- Mouse: look around
-- W/A/S/D (or Z/Q on AZERTY): move
-- Space: jump (double tap to toggle fly)
-- Shift: descend (in fly mode)
-- Left click: break block
-- Right click: place block / toggle button / edit sign
-- Mouse wheel: cycle hotbar
-- 1-8: select hotbar slot
-- E: open inventory
-- Q: open block settings (button, splitter/merger, wire info, clock)
-- R: return to spawn
-- F11: toggle fullscreen
-- ESC: pause menu / close dialogs
-- Tab: switch fields in edit menus, suggest save name in save menu
+## Ce que vous pouvez créer
 
-## Maps and saves (Players)
-- Press `ESC` and choose "SAVE / LOAD" to open the save menu.
-- "Create" saves a new map with the name you type.
-- "Overwrite" replaces the selected save.
-- "Load" opens the selected save.
+- Compteurs, horloges et minuteries
+- Additionneurs, décodeurs et multiplexeurs
+- Circuits combinatoires et séquentiels
+- Afficheurs LED et écrans 7 segments
+- Gadgets interactifs et machines entièrement personnalisées
 
+## Les blocs logiques
 
-```
-==================================================
-  PLAYERS: You can ignore everything below this.
-==================================================
-```
+![Blocs logiques disponibles dans Logicraft](images/blocks.png)
 
-## Dev and build (Windows) - for contributors
+- Fils, bouton, LED et panneau
+- AND, OR, NOT et XOR
+- Bascule D
+- Additionneur
+- Séparateur et fusionneur
+- Décodeur et multiplexeur
+- Comparateur
+- Horloge
 
-### Build from source
-Prerequisites:
+## Les blocs du monde
+
+Herbe, terre, pierre, bois, feuilles, eau, planches, sable et verre : construisez un environnement à la hauteur de vos circuits.
+
+## Installation
+
+### Joueurs — Windows 64 bits
+
+1. Téléchargez l’installateur Windows depuis la page [GitHub Releases](https://github.com/Jzn-wbr/messercraft/releases).
+2. Lancez `Logicraft-...-win64.exe`.
+3. Démarrez le jeu depuis le menu Démarrer ou le raccourci du bureau.
+
+Vous n’avez besoin que du fichier `.exe`.
+
+![Télécharger Logicraft depuis GitHub Releases](images/releases.png)
+
+## Commandes
+
+| Action | Touche |
+| --- | --- |
+| Regarder autour de soi | Souris |
+| Se déplacer | `W/A/S/D` ou `Z/Q` (AZERTY) |
+| Sauter | `Espace` — deux appuis pour voler |
+| Descendre en mode vol | `Maj` |
+| Casser un bloc | Clic gauche |
+| Poser un bloc / actionner un bouton / modifier un panneau | Clic droit |
+| Changer de case rapide | Molette |
+| Sélectionner une case | `1` à `8` |
+| Ouvrir l’inventaire | `E` |
+| Ouvrir les réglages d’un bloc | `Q` |
+| Revenir au point de départ | `R` |
+| Plein écran | `F11` |
+| Menu pause / fermer une fenêtre | `Échap` |
+
+## Cartes et sauvegardes
+
+Appuyez sur `Échap`, puis choisissez **SAVE / LOAD** pour ouvrir le menu des sauvegardes.
+
+- **Create** crée une nouvelle carte avec le nom saisi.
+- **Overwrite** remplace la sauvegarde sélectionnée.
+- **Load** ouvre la sauvegarde sélectionnée.
+
+---
+
+## Contribuer
+
+Vous souhaitez améliorer Logicraft, ajouter des blocs ou proposer une nouvelle idée ? Les contributions sont les bienvenues. Ouvrez une issue pour partager votre proposition ou une pull request pour soumettre directement une amélioration.
+
+### Compiler depuis les sources — Windows
+
+Prérequis :
+
 - CMake 3.21+
-- vcpkg (example: `C:\\vcpkg`)
-- Visual Studio Build Tools 2022 (cl.exe)
+- vcpkg (par exemple `C:\\vcpkg`)
+- Visual Studio Build Tools 2022 (`cl.exe`)
 
-Configure and build (PowerShell):
+Configurer et compiler dans PowerShell :
+
 ```powershell
 cmake -B build -S . -G "Visual Studio 17 2022" -A x64 `
   -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
@@ -85,34 +117,35 @@ cmake -B build -S . -G "Visual Studio 17 2022" -A x64 `
 cmake --build build --config Release
 ```
 
-Run:
+Lancer le jeu :
+
 ```powershell
 .\build\Release\logicraft.exe
 ```
 
-### Create the installer
-Prerequisite:
-- NSIS (needed by CPack to generate the installer)
+### Créer l’installateur
 
-Optional icon (app + installer):
-- Put `images/logicraft.ico` (multi-size .ico recommended).
+NSIS est nécessaire pour générer l’installateur avec CPack.
 
-Build and package:
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
 cpack -C Release --config build\CPackConfig.cmake
 ```
-The installer will be created in `build`.
 
-## Project structure
-- `src/` : C++ code
-- `images/` : textures (BMP)
-- `maps/` : save files (`.bulldog`)
-- `config.cfg` : user configuration
-- `CMakeLists.txt` + `vcpkg.json` : build and dependencies
-- `build/` : CMake output (ignored by git)
+L’installateur sera créé dans `build`.
 
-## Notes
-- SDL2 and GLEW are linked dynamically by default. DLLs are copied next to the exe so it runs without extra setup.
-- To avoid DLL copies, use `-DVCPKG_APPLOCAL_DEPS=OFF` and add `C:\\vcpkg\\installed\\x64-windows\\bin` to `PATH`, or use the static triplet `x64-windows-static`.
+## Structure du projet
+
+- `src/` : code C++
+- `images/` : textures et visuels
+- `maps/` : cartes sauvegardées (`.bulldog`)
+- `config.cfg` : configuration utilisateur
+- `CMakeLists.txt` et `vcpkg.json` : compilation et dépendances
+- `build/` : fichiers générés par CMake (ignorés par Git)
+
+## Notes techniques
+
+SDL2 et GLEW sont liés dynamiquement par défaut. Leurs DLL sont copiées à côté de l’exécutable afin que le jeu fonctionne sans configuration supplémentaire.
+
+Pour désactiver la copie des DLL, utilisez `-DVCPKG_APPLOCAL_DEPS=OFF` et ajoutez `C:\\vcpkg\\installed\\x64-windows\\bin` au `PATH`, ou choisissez le triplet statique `x64-windows-static`.
