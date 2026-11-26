@@ -4,9 +4,6 @@
 #include <cmath>
 #include <random>
 
-// Forward declaration for render dirty marking
-void markChunkFromBlock(int x, int y, int z);
-
 const std::map<BlockType, BlockInfo> BLOCKS = {
     {BlockType::Air, {"Air", false, {0.7f, 0.85f, 1.0f}}},
     {BlockType::Grass, {"Grass", true, {0.2f, 0.7f, 0.2f}}},
@@ -267,7 +264,6 @@ void World::setSignText(int x, int y, int z, const std::string &text)
     if (idx < 0 || idx >= static_cast<int>(signText.size()))
         return;
     signText[idx] = text;
-    markChunkFromBlock(x, y, z);
 }
 
 bool collidesAt(const World &world, float px, float py, float pz, float playerHeight)
@@ -397,10 +393,10 @@ HitInfo raycast(const World &world, float ox, float oy, float oz, float dx, floa
     return {0, 0, 0, 0, 0, 0, false};
 }
 
-void updateLogic(World &world)
+void updateLogic(World &world, void (*onChange)(int, int, int))
 {
-    static uint64_t clockTick = 0;
-    ++clockTick;
+    const uint64_t clockTick = world.tick() + 1;
+    world.setTick(clockTick);
     int total = world.totalSize();
     std::vector<uint8_t> next(total, 0);
     std::vector<uint8_t> nextWidth(total, 8);
@@ -1058,8 +1054,8 @@ void updateLogic(World &world)
             {
                 uint8_t old = world.getPower(x, y, z);
                 uint8_t nw = next[idx(x, y, z)];
-                if (old != nw)
-                    markChunkFromBlock(x, y, z);
+                if (onChange && old != nw)
+                    onChange(x, y, z);
             }
         }
     }

@@ -6,6 +6,23 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+add_library(logicraft_core src/world.cpp src/snapshot.cpp)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(snapshot_test tests/snapshot.cpp)
+  target_include_directories(snapshot_test PRIVATE src)
+  target_link_libraries(snapshot_test PRIVATE logicraft_core)
+  add_test(NAME snapshot COMMAND snapshot_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/maps/example map.bulldog"
+    "${CMAKE_CURRENT_SOURCE_DIR}/maps/syslog.bulldog")
+endif()
+
+option(LOGICRAFT_BUILD_CLIENT "Build the graphical SDL client" ON)
+if(NOT LOGICRAFT_BUILD_CLIENT)
+  return()
+endif()
+
 find_package(SDL2 CONFIG REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(OpenGL REQUIRED)
@@ -13,10 +30,10 @@ find_package(OpenGL REQUIRED)
 add_executable(logicraft
   src/main.cpp
   src/render.cpp
-  src/world.cpp
 )
 
 target_link_libraries(logicraft PRIVATE
+  logicraft_core
   SDL2::SDL2
   GLEW::GLEW
   OpenGL::GL
@@ -37,6 +54,13 @@ if(WIN32)
     target_sources(logicraft PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/logicraft.rc")
   endif()
 endif()
+
+# Allow launching directly from a build directory, including multi-config builds.
+add_custom_command(TARGET logicraft POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_CURRENT_SOURCE_DIR}/images" "$<TARGET_FILE_DIR:logicraft>/images"
+  VERBATIM
+)
 
 install(TARGETS logicraft RUNTIME DESTINATION .)
 install(FILES config.cfg DESTINATION .)

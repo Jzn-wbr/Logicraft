@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "snapshot.hpp"
 #include "render.hpp"
 #include "types.hpp"
 #include "world.hpp"
@@ -35,43 +36,45 @@
 static std::filesystem::path gResourceRoot = std::filesystem::current_path();
 static std::filesystem::path gMapsDir = "maps";
 
-std::filesystem::path resolveResourceRoot(const std::string &argv0)
+std::filesystem::path executableDirectory()
+{
+    char *base = SDL_GetBasePath();
+    if (!base)
+        return std::filesystem::current_path();
+    auto path = std::filesystem::u8path(base);
+    SDL_free(base);
+    return path;
+}
+
+std::filesystem::path resolveResourceRoot(const std::filesystem::path &executableDir)
 {
     namespace fs = std::filesystem;
-    fs::path exePath;
-    if (!argv0.empty())
+    // An installed binary has its assets alongside it. Development builds
+    // may be nested several directories below the source tree.
+    for (auto dir = executableDir; !dir.empty(); dir = dir.parent_path())
     {
         std::error_code ec;
-        exePath = fs::weakly_canonical(fs::path(argv0), ec);
-        if (ec)
-            exePath.clear();
-    }
-
-    std::vector<fs::path> candidates = {fs::current_path()};
-    if (!exePath.empty())
-    {
-        candidates.push_back(exePath.parent_path());
-        candidates.push_back(exePath.parent_path().parent_path());
-        candidates.push_back(exePath.parent_path().parent_path().parent_path());
-    }
-
-    for (const auto &base : candidates)
-    {
-        if (base.empty())
-            continue;
-        if (fs::exists(base / "images") && fs::exists(base / "maps"))
-            return base;
+        if (fs::is_directory(dir / "maps", ec) && fs::is_directory(dir / "images", ec))
+            return dir;
+        if (dir == dir.root_path())
+            break;
     }
     return fs::current_path();
 }
 
 std::string assetPath(const std::string &relative)
 {
-    return (gResourceRoot / relative).string();
+    static const auto executableDir = executableDirectory();
+    std::error_code ec;
+    auto local = executableDir / relative;
+    if (std::filesystem::is_regular_file(local, ec))
+        return local.u8string();
+    return (gResourceRoot / relative).u8string();
 }
 
 void drawTextTiny(float x, float y, float size, const std::string &text, float r, float g, float b, float a);
 std::string stemFromPath(const std::string &path);
+std::string saveStatus;
 extern bool gSaveInputFocus;
 extern std::vector<std::string> gSaveList;
 extern int gSaveIndex;
@@ -709,7 +712,8 @@ void drawInventoryBar(int winW, int winH, const std::vector<ItemStack> &hotbar, 
 
         // stack count
         int count = hotbar[i].count;
-        drawNumber(x + slotSize - 4.0f, y + slotSize - 16.0f, count, 10.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+        if (count > 0)
+            drawNumber(x + slotSize - 4.0f, y + slotSize - 16.0f, count, 10.0f, 0.0f, 0.0f, 0.0f, 1.0f);
 
         // selection glow
         if (i == selected)
@@ -730,55 +734,110 @@ void drawCrosshair(int winW, int winH)
     drawQuad(cx - thick * 0.5f, cy - len, thick, len * 2.0f, 1.0f, 1.0f, 1.0f, 0.9f);
 }
 
-PauseMenuLayout computePauseLayout(int winW, int winH)
+enum class MenuAction { Normal, Primary, Caution, Disabled };
+
+// Repeat a tile from the world's atlas without stretching its pixel pattern.
+void menuMaterial(float x, float y, float width, float height, BlockType material, float light)
 {
-    PauseMenuLayout l;
-    l.panelW = 520.0f;
-    l.panelH = 420.0f;
-    l.panelX = (winW - l.panelW) * 0.5f;
-    l.panelY = (winH - l.panelH) * 0.5f;
-
-    l.resumeW = l.panelW * 0.82f;
-    l.resumeH = 56.0f;
-    l.resumeX = l.panelX + (l.panelW - l.resumeW) * 0.5f;
-    l.resumeY = l.panelY + 28.0f;
-
-    l.manageW = l.resumeW;
-    l.manageH = 56.0f;
-    l.manageX = l.resumeX;
-    l.manageY = l.resumeY + l.resumeH + 24.0f;
-
-    l.settingsW = l.resumeW;
-    l.settingsH = 56.0f;
-    l.settingsX = l.resumeX;
-    l.settingsY = l.manageY + l.manageH + 24.0f;
-
-    l.quitW = l.resumeW;
-    l.quitH = 56.0f;
-    l.quitX = l.resumeX;
-    l.quitY = l.settingsY + l.settingsH + 24.0f;
-    return l;
+    const int tile = tileIndexFor(material);
+    const float u = float(tile % ATLAS_COLS) / ATLAS_COLS;
+    const float v = float(tile / ATLAS_COLS) / ATLAS_ROWS;
+    const float pitch = ATLAS_TILE_SIZE * 2.0f;
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, gAtlasTex);
+    glColor3f(light, light, light);
+    glBegin(GL_QUADS);
+    for (float dy = 0; dy < height; dy += pitch)
+    {
+        for (float dx = 0; dx < width; dx += pitch)
+        {
+            float w = std::min(pitch, width-dx), h = std::min(pitch, height-dy);
+            float right = u + w / (pitch * ATLAS_COLS), bottom = v + h / (pitch * ATLAS_ROWS);
+            glTexCoord2f(u,v); glVertex2f(x+dx,y+dy);
+            glTexCoord2f(right,v); glVertex2f(x+dx+w,y+dy);
+            glTexCoord2f(right,bottom); glVertex2f(x+dx+w,y+dy+h);
+            glTexCoord2f(u,bottom); glVertex2f(x+dx,y+dy+h);
+        }
+    }
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
 }
+
+void signText(float x, float y, float size, const std::string &label)
+{
+    drawTextTiny(x, y, size, label, 0.16f, 0.085f, 0.035f, 1);
+}
+
+void signBoard(float x, float y, float w, float h, float light = 0.94f)
+{
+    drawQuad(x+2, y+3, w, h, 0.27f, 0.18f, 0.10f, 1);
+    menuMaterial(x, y, w, h, BlockType::Plank, light);
+    for (float pin : {x+6, x+w-9})
+        drawQuad(pin, y+h/2-1, 3, 3, 0.29f, 0.17f, 0.08f, 1);
+}
+
+void signPosts(float x, float y, float w, float h)
+{
+    for (float post : {x+w*0.12f, x+w*0.86f})
+        menuMaterial(post, y+6, 12, h+22, BlockType::Wood, 0.82f);
+}
+
+void signHeading(float x, float y, float w, const char *title)
+{
+    signBoard(x, y, w, 46);
+    float textWidth = (4.8f*std::strlen(title)-0.8f)*4;
+    signText(std::round(x+(w-textWidth)/2), y+13, 4, title);
+}
+
+void menuPanel(float x, float y, float w, float h, const char *title)
+{
+    signPosts(x,y,w,h);
+    signBoard(x+5,y+54,w-10,h-54);
+    signHeading(x,y,w,title);
+}
+
+void menuButton(float x, float y, float w, float h, const char *label, bool hover,
+                MenuAction action = MenuAction::Normal)
+{
+    bool enabled = action != MenuAction::Disabled;
+    signBoard(x,y,w,h,enabled ? 1.04f : 0.65f);
+    if (hover && enabled)
+        drawOutline(x+1,y+1,w-2,h-2,0.99f,0.85f,0.33f,1,2);
+    float size = w < 145 ? 2 : 3;
+    float tw = (std::strlen(label)*4.8f-0.8f)*size;
+    signText(std::round(x+(w-tw)/2),std::round(y+(h-5*size)/2),size,label);
+}
+
+float menuDockX(int winW, float panelW)
+{
+    float centered = (winW-panelW)*0.5f;
+    return winW >= panelW*2 ? winW-panelW-32 : centered;
+}
+
+constexpr int saveRows = 6;
+constexpr int saveRowHeight = 24;
+int saveOffset = 0;
 
 SaveMenuLayout computeSaveMenuLayout(int winW, int winH)
 {
     SaveMenuLayout s;
     s.panelW = 560.0f;
-    s.panelH = 400.0f;
-    s.panelX = (winW - s.panelW) * 0.5f;
+    int visibleRows = std::clamp(static_cast<int>(gSaveList.size()), 1, saveRows);
+    s.panelH = 400.0f - (saveRows-visibleRows)*saveRowHeight;
+    s.panelX = menuDockX(winW, s.panelW);
     s.panelY = (winH - s.panelH) * 0.5f;
 
     s.listW = s.panelW * 0.86f;
-    s.listH = s.panelH * 0.52f;
+    s.listH = visibleRows * saveRowHeight;
     s.listX = s.panelX + (s.panelW - s.listW) * 0.5f;
-    s.listY = s.panelY + 30.0f;
+    s.listY = s.panelY + 66.0f;
 
     s.inputW = s.panelW * 0.86f;
     s.inputH = 36.0f;
     s.inputX = s.panelX + (s.panelW - s.inputW) * 0.5f;
-    s.inputY = s.listY + s.listH + 12.0f;
+    s.inputY = s.listY + s.listH + 34.0f;
 
-    s.overwriteW = s.panelW * 0.26f;
+    s.overwriteW = (s.listW - 36.0f) / 4.0f;
     s.overwriteH = 52.0f;
     s.createW = s.overwriteW;
     s.createH = s.overwriteH;
@@ -801,78 +860,36 @@ SaveMenuLayout computeSaveMenuLayout(int winW, int winH)
     return s;
 }
 
-void drawPauseMenu(int winW, int winH, const PauseMenuLayout &l, bool hoverResume, bool hoverManage, bool hoverSettings, bool hoverQuit)
-{
-    drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.65f);
-    drawQuad(l.panelX + 8.0f, l.panelY + 10.0f, l.panelW, l.panelH, 0.0f, 0.0f, 0.0f, 0.3f);
-    drawQuad(l.panelX, l.panelY, l.panelW, l.panelH, 0.06f, 0.06f, 0.07f, 0.96f);
-    drawOutline(l.panelX, l.panelY, l.panelW, l.panelH, 0.9f, 0.9f, 0.9f, 0.15f, 2.5f);
-    drawQuad(l.panelX + 20.0f, l.panelY + 26.0f, l.panelW - 40.0f, 2.0f, 1.0f, 1.0f, 1.0f, 0.06f);
-    drawTextTiny(l.panelX + 24.0f, l.panelY + 12.0f, 2.0f, "PAUSE", 0.95f, 0.95f, 0.92f, 1.0f);
-
-    auto drawButton = [](float x, float y, float w, float h, float r, float g, float b, bool hover)
-    {
-        float a = hover ? 0.98f : 0.9f;
-        float accent = hover ? 0.98f : 0.85f;
-        drawQuad(x, y, w, h, r, g, b, a);
-        drawQuad(x, y, w, h * 0.45f, 1.0f, 1.0f, 1.0f, hover ? 0.12f : 0.08f);
-        drawOutline(x, y, w, h, accent, accent, accent, hover ? 0.32f : 0.22f, hover ? 2.8f : 2.0f);
-    };
-
-    drawButton(l.resumeX, l.resumeY, l.resumeW, l.resumeH, 0.16f, 0.17f, 0.2f, hoverResume);
-    drawButton(l.manageX, l.manageY, l.manageW, l.manageH, 0.16f, 0.17f, 0.2f, hoverManage);
-    drawButton(l.settingsX, l.settingsY, l.settingsW, l.settingsH, 0.16f, 0.17f, 0.2f, hoverSettings);
-    drawButton(l.quitX, l.quitY, l.quitW, l.quitH, 0.2f, 0.15f, 0.14f, hoverQuit);
-
-    auto centerTinyText = [](float x, float y, float w, float size, const std::string &txt, float r, float g, float b,
-                             float a)
-    {
-        float width = static_cast<float>(txt.size()) * (4.0f * size + size * 0.8f) - size * 0.8f;
-        float tx = x + (w - width) * 0.5f;
-        drawTextTiny(tx, y, size, txt, r, g, b, a);
-    };
-
-    float labelSize = 1.8f;
-    centerTinyText(l.resumeX, l.resumeY + l.resumeH * 0.33f, l.resumeW, labelSize, "RESUME", 1.0f, 1.0f, 0.98f,
-                   hoverResume ? 1.0f : 0.92f);
-    centerTinyText(l.manageX, l.manageY + l.manageH * 0.33f, l.manageW, labelSize, "SAVE / LOAD", 1.0f, 1.0f, 0.98f,
-                   hoverManage ? 1.0f : 0.92f);
-    centerTinyText(l.settingsX, l.settingsY + l.settingsH * 0.33f, l.settingsW, labelSize, "REGLAGES", 1.0f, 1.0f, 0.98f,
-                   hoverSettings ? 1.0f : 0.92f);
-    centerTinyText(l.quitX, l.quitY + l.quitH * 0.33f, l.quitW, labelSize, "QUIT", 1.0f, 1.0f, 0.98f,
-                   hoverQuit ? 1.0f : 0.92f);
-}
-
 void drawSaveMenu(int winW, int winH, const SaveMenuLayout &s, int highlightedIndex, bool hoverCreate,
                   bool hoverOverwrite, bool hoverLoad, bool hoverBack, const std::string &inputName)
 {
-    drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.55f);
-    drawQuad(s.panelX, s.panelY, s.panelW, s.panelH, 0.05f, 0.05f, 0.08f, 0.92f);
-    drawOutline(s.panelX, s.panelY, s.panelW, s.panelH, 1.0f, 1.0f, 1.0f, 0.08f, 3.0f);
-
-    drawQuad(s.listX, s.listY, s.listW, s.listH, 0.12f, 0.12f, 0.15f, 0.9f);
-    drawOutline(s.listX, s.listY, s.listW, s.listH, 1.0f, 1.0f, 1.0f, 0.15f, 2.0f);
-
-    float lineH = 20.0f;
-    float textSize = 1.4f;
-    for (int i = 0; i < static_cast<int>(gSaveList.size()); ++i)
+    drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0,0,0,0.18f);
+    signPosts(s.panelX,s.panelY,s.panelW,s.panelH-44);
+    signHeading(s.panelX,s.panelY,s.panelW,"CARTES");
+    signBoard(s.inputX-8,s.inputY-26,s.inputW+16,s.inputH+32);
+    if (!saveStatus.empty())
+        signBoard(s.listX,s.panelY+s.panelH-34,s.listW,26);
+    if (gSaveList.empty())
+        signBoard(s.listX,s.listY,s.listW,saveRowHeight-3);
+    if (gSaveList.empty())
+        signText(s.listX+12,s.listY+8,2,"AUCUNE CARTE");
+    for (int row = 0; row < saveRows && row + saveOffset < static_cast<int>(gSaveList.size()); ++row)
     {
-        float y = s.listY + 8.0f + i * lineH;
-        if (y + lineH > s.listY + s.listH - 8.0f)
-            break;
-        bool sel = (i == highlightedIndex);
-        if (sel)
-            drawQuad(s.listX + 4.0f, y - 2.0f, s.listW - 8.0f, lineH + 4.0f, 0.2f, 0.3f, 0.5f, 0.7f);
-        std::string name = stemFromPath(gSaveList[i]);
-        drawTextTiny(s.listX + 10.0f, y + 4.0f, textSize, name, 1.0f, 1.0f, 1.0f, 0.95f);
+        int i = row + saveOffset;
+        float y = s.listY + row*saveRowHeight;
+        signBoard(s.listX,y,s.listW,saveRowHeight-3);
+        if (i == highlightedIndex)
+            drawOutline(s.listX,y,s.listW,saveRowHeight-3,0.99f,0.85f,0.33f,1,2);
+        signText(s.listX+15,y+5,2,stemFromPath(gSaveList[i]).substr(0,45));
     }
-
+    signText(s.inputX,s.inputY-19,2,"NOM DE LA NOUVELLE CARTE");
+    signText(s.listX,s.panelY+s.panelH-26,2,saveStatus);
     // input field
-    drawQuad(s.inputX, s.inputY, s.inputW, s.inputH, 0.12f, 0.12f, 0.15f, 0.9f);
+    drawQuad(s.inputX, s.inputY, s.inputW, s.inputH, 0.20f, 0.12f, 0.06f, 0.92f);
     float outlineA = gSaveInputFocus ? 0.55f : 0.2f;
     drawOutline(s.inputX, s.inputY, s.inputW, s.inputH, 1.0f, 1.0f, 1.0f, outlineA, 2.0f);
-    std::string displayName = inputName.empty() ? "<nom>" : inputName;
-    float textSizeInput = 1.5f;
+    std::string displayName = inputName.empty() ? "" : inputName;
+    float textSizeInput = 2;
     float textX = s.inputX + 10.0f;
     float textY = s.inputY + 9.0f;
     drawTextTiny(textX, textY, textSizeInput, displayName, 1.0f, 1.0f, 1.0f,
@@ -887,35 +904,10 @@ void drawSaveMenu(int winW, int winH, const SaveMenuLayout &s, int highlightedIn
             drawQuad(caretX + 2.0f, textY, 2.0f, caretH, 1.0f, 1.0f, 1.0f, 0.9f);
     }
 
-    auto drawButton = [](float x, float y, float w, float h, float r, float g, float b, bool hover)
-    {
-        float a = hover ? 0.95f : 0.8f;
-        drawQuad(x, y, w, h, r, g, b, a);
-        drawOutline(x, y, w, h, 0.0f, 0.0f, 0.0f, 0.45f, 3.0f);
-    };
-
-    drawButton(s.createX, s.createY, s.createW, s.createH, 0.2f, 0.5f, 0.8f, hoverCreate);
-    drawButton(s.overwriteX, s.overwriteY, s.overwriteW, s.overwriteH, 0.18f, 0.55f, 0.25f, hoverOverwrite);
-    drawButton(s.loadX, s.loadY, s.loadW, s.loadH, 0.45f, 0.18f, 0.75f, hoverLoad);
-    drawButton(s.backX, s.backY, s.backW, s.backH, 0.65f, 0.18f, 0.12f, hoverBack);
-
-    auto centerTinyText = [](float x, float y, float w, float size, const std::string &txt, float r, float g, float b,
-                             float a)
-    {
-        float width = static_cast<float>(txt.size()) * (4.0f * size + size * 0.8f) - size * 0.8f;
-        float tx = x + (w - width) * 0.5f;
-        drawTextTiny(tx, y, size, txt, r, g, b, a);
-    };
-
-    float labelSize = 1.6f;
-    centerTinyText(s.createX, s.createY + s.createH * 0.33f, s.createW, labelSize, "CREATE", 1.0f, 1.0f, 1.0f,
-                   hoverCreate ? 1.0f : 0.9f);
-    centerTinyText(s.overwriteX, s.overwriteY + s.overwriteH * 0.33f, s.overwriteW, labelSize, "OVERWRITE", 1.0f, 1.0f,
-                   1.0f, hoverOverwrite ? 1.0f : 0.9f);
-    centerTinyText(s.loadX, s.loadY + s.loadH * 0.33f, s.loadW, labelSize, "LOAD", 1.0f, 1.0f, 1.0f,
-                   hoverLoad ? 1.0f : 0.9f);
-    centerTinyText(s.backX, s.backY + s.backH * 0.33f, s.backW, labelSize, "RETURN", 1.0f, 1.0f, 1.0f,
-                   hoverBack ? 1.0f : 0.9f);
+    menuButton(s.createX, s.createY, s.createW, s.createH, "CREER", hoverCreate, MenuAction::Normal);
+    menuButton(s.overwriteX, s.overwriteY, s.overwriteW, s.overwriteH, "ECRASER", hoverOverwrite, highlightedIndex < 0 ? MenuAction::Disabled : MenuAction::Caution);
+    menuButton(s.loadX, s.loadY, s.loadW, s.loadH, "CHARGER", hoverLoad, highlightedIndex < 0 ? MenuAction::Disabled : MenuAction::Primary);
+    menuButton(s.backX, s.backY, s.backW, s.backH, "RETOUR", hoverBack, MenuAction::Normal);
 }
 
 bool pointInRect(float mx, float my, float x, float y, float w, float h)
@@ -963,7 +955,7 @@ void drawTooltip(float mx, float my, int winW, int winH, const std::string &text
 {
     if (text.empty())
         return;
-    float size = 9.0f;
+    float size = 2.0f;
     float padding = 6.0f;
     float width = static_cast<float>(text.size()) * (4 * size + size * 0.8f) - size * 0.8f + padding * 2;
     float height = 5 * size + padding * 2;
@@ -971,24 +963,20 @@ void drawTooltip(float mx, float my, int winW, int winH, const std::string &text
     float ty = my - height - 12.0f;
     tx = std::clamp(tx, 4.0f, static_cast<float>(winW) - width - 4.0f);
     ty = std::clamp(ty, 4.0f, static_cast<float>(winH) - height - 4.0f);
-    drawQuad(tx, ty, width, height, 0.05f, 0.05f, 0.08f, 0.9f);
+    signBoard(tx,ty,width,height);
     drawOutline(tx, ty, width, height, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
-    drawTextTiny(tx + padding, ty + padding, size, text, 1.0f, 0.95f, 0.85f, 1.0f);
+    signText(tx+padding,ty+padding,size,text);
 }
 
 void drawSignEditBox(int winW, int winH, const std::string &text)
 {
-    float size = 5.0f;
-    float padding = 3.0f;
-    const std::string placeholder = "<Tapez le texte du panneau>";
-    const std::string &display = text.empty() ? placeholder : text;
-    float width = static_cast<float>(std::max<size_t>(1, display.size())) * (4 * size + size * 0.8f) - size * 0.8f + padding * 2;
-    float height = 5 * size + padding * 2;
-    float tx = (winW - width) * 0.5f;
-    float ty = winH * 0.5f - height * 0.5f;
-    drawQuad(tx, ty, width, height, 0.02f, 0.02f, 0.04f, 0.9f);
-    drawOutline(tx, ty, width, height, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
-    drawTextTiny(tx + padding, ty + padding, size, display, 1.0f, 0.95f, 0.85f, 1.0f);
+    const float w = std::min(560.0f, winW-32.0f);
+    const float x = (winW-w)/2, y = (winH-136)/2;
+    menuPanel(x,y,w,136,"PANNEAU");
+    const std::string display = text.empty() ? "TAPEZ LE TEXTE DU PANNEAU" : text;
+    const float size = std::min(3.0f,(w-40)/(4.8f*display.size()));
+    signText(x+20,y+74,size,display);
+    signText(x+20,y+111,1.5f,"ENTREE VALIDER   ESC ANNULER");
 }
 
 struct Config
@@ -999,63 +987,74 @@ struct Config
     bool vsync = true;
 };
 
-struct MainMenuLayout
-{
-    float titleX = 0, titleY = 0;
-    float playX = 0, playY = 0, playW = 0, playH = 0;
-    float settingsX = 0, settingsY = 0, settingsW = 0, settingsH = 0;
-    float quitX = 0, quitY = 0, quitW = 0, quitH = 0;
+// Pixel coordinates on the 1280 x 720 captures. The first three boards
+// occupy the same positions in both photographs.
+struct MenuPoint { float x, y; };
+using SignFace = std::array<MenuPoint, 4>;
+constexpr SignFace menuSigns[] = {
+    {{{334,304},{592,303},{593,348},{338,353}}},
+    {{{339,366},{593,360},{594,403},{342,414}}},
+    {{{343,427},{594,414},{594,457},{346,473}}},
+    {{{347,485},{594,468},{595,509},{350,531}}}
 };
 
-MainMenuLayout computeMainMenuLayout(int winW, int winH)
+struct MenuImageLayout
 {
-    MainMenuLayout l{};
-    l.titleX = static_cast<float>(winW) * 0.5f;
-    l.titleY = static_cast<float>(winH) * 0.28f;
-    l.playW = 240.0f;
-    l.playH = 64.0f;
-    l.settingsW = 220.0f;
-    l.settingsH = 58.0f;
-    l.quitW = 180.0f;
-    l.quitH = 54.0f;
-    l.playX = static_cast<float>(winW) * 0.5f - l.playW * 0.5f;
-    l.playY = static_cast<float>(winH) * 0.55f;
-    l.settingsX = static_cast<float>(winW) * 0.5f - l.settingsW * 0.5f;
-    l.settingsY = l.playY + l.playH + 16.0f;
-    l.quitX = static_cast<float>(winW) * 0.5f - l.quitW * 0.5f;
-    l.quitY = l.settingsY + l.settingsH + 16.0f;
-    return l;
-}
+    float scale, x, y;
 
-void drawMainMenu(int winW, int winH, const MainMenuLayout &l, bool hoverPlay, bool hoverSettings, bool hoverQuit, float t)
-{
-    float gradTop = 0.04f + 0.03f * std::sin(t * 0.4f);
-    float gradBottom = 0.08f;
-    drawQuad(0, 0, static_cast<float>(winW), static_cast<float>(winH), gradTop, gradTop, gradTop + 0.02f, 1.0f);
-    drawQuad(0, static_cast<float>(winH) * 0.5f, static_cast<float>(winW), static_cast<float>(winH) * 0.5f,
-             gradBottom, gradBottom, gradBottom + 0.02f, 1.0f);
+    MenuImageLayout(int width, int height)
+        : scale(std::min(width/1280.0f, height/720.0f)),
+          x((width-1280*scale)/2), y((height-720*scale)/2) {}
 
-    drawQuad(l.titleX - 250.0f, l.titleY - 60.0f, 500.0f, 140.0f, 0.05f, 0.055f, 0.065f, 0.92f);
-    drawOutline(l.titleX - 250.0f, l.titleY - 60.0f, 500.0f, 140.0f, 0.9f, 0.9f, 0.9f, 0.18f, 2.5f);
-    drawQuad(l.titleX - 230.0f, l.titleY + 8.0f, 460.0f, 2.0f, 1.0f, 1.0f, 1.0f, 0.08f);
-    // Title with subtle depth
-    drawTextTiny(l.titleX - 200.0f + 2.0f, l.titleY + 2.0f, 8.6f, "Logicraft", 0.0f, 0.0f, 0.0f, 0.35f);
-    drawTextTiny(l.titleX - 200.0f, l.titleY, 8.6f, "Logicraft", 1.0f, 0.99f, 0.94f, 1.0f);
-    drawTextTiny(l.titleX - 200.0f, l.titleY + 76.0f, 2.6f, "Logic sandbox", 0.9f, 0.9f, 0.9f, 0.85f);
-
-    auto drawBtn = [&](float x, float y, float w, float h, const char *label, bool hover)
+    int signAt(float mx, float my, bool paused) const
     {
-        float base = hover ? 0.18f : 0.14f;
-        float accent = hover ? 0.98f : 0.85f;
-        drawQuad(x, y, w, h, base, base, base + 0.03f, 0.96f);
-        drawQuad(x, y, w, h * 0.45f, 1.0f, 1.0f, 1.0f, hover ? 0.12f : 0.08f);
-        drawOutline(x, y, w, h, accent, accent, accent, hover ? 0.32f : 0.22f, hover ? 2.8f : 2.0f);
-        float tw = static_cast<float>(std::strlen(label)) * (4.0f * 3.4f + 3.4f * 0.8f) - 3.4f * 0.8f;
-        drawTextTiny(x + (w - tw) * 0.5f, y + h * 0.35f, 3.4f, label, 1.0f, 1.0f, 0.98f, 1.0f);
-    };
-    drawBtn(l.playX, l.playY, l.playW, l.playH, "Jouer", hoverPlay);
-    drawBtn(l.settingsX, l.settingsY, l.settingsW, l.settingsH, "Reglages", hoverSettings);
-    drawBtn(l.quitX, l.quitY, l.quitW, l.quitH, "Quitter", hoverQuit);
+        if (scale <= 0) return -1;
+        MenuPoint p{(mx-x)/scale,(my-y)/scale};
+        for (int i=0; i<(paused ? 4 : 3); ++i)
+        {
+            const auto &face = menuSigns[i];
+            bool inside = true;
+            for (size_t k=0; k<face.size(); ++k)
+            {
+                auto a = face[k], b = face[(k+1)%face.size()];
+                if ((b.x-a.x)*(p.y-a.y) < (b.y-a.y)*(p.x-a.x))
+                {
+                    inside = false;
+                    break;
+                }
+            }
+            if (inside) return i;
+        }
+        return -1;
+    }
+};
+
+void drawMenuImage(const MenuImageLayout &layout, GLuint texture, int hovered)
+{
+    glPushMatrix();
+    glTranslatef(layout.x,layout.y,0);
+    glScalef(layout.scale,layout.scale,1);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D,texture);
+    glColor4f(1,1,1,1);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0,0); glVertex2f(0,0);
+    glTexCoord2f(1,0); glVertex2f(1280,0);
+    glTexCoord2f(1,1); glVertex2f(1280,720);
+    glTexCoord2f(0,1); glVertex2f(0,720);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+    if (hovered >= 0)
+    {
+        glColor4f(0.99f,0.85f,0.33f,1);
+        glLineWidth(2);
+        glBegin(GL_LINE_LOOP);
+        for (auto corner : menuSigns[hovered])
+            glVertex2f(corner.x,corner.y);
+        glEnd();
+        glLineWidth(1);
+    }
+    glPopMatrix();
 }
 
 struct SettingsMenuLayout
@@ -1073,27 +1072,28 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
     SettingsMenuLayout s{};
     s.panelW = 520.0f;
     s.panelH = 340.0f;
-    s.panelX = (static_cast<float>(winW) - s.panelW) * 0.5f;
+    s.panelX = menuDockX(winW, s.panelW);
     s.panelY = (static_cast<float>(winH) - s.panelH) * 0.5f;
     s.sensMinusW = 36.0f;
     s.sensMinusH = 36.0f;
     s.sensMinusX = s.panelX + 220.0f;
-    s.sensMinusY = s.panelY + 92.0f;
+    s.sensMinusY = s.panelY + 76.0f;
     s.sensPlusW = 36.0f;
     s.sensPlusH = 36.0f;
     s.sensPlusX = s.sensMinusX + 150.0f;
     s.sensPlusY = s.sensMinusY;
-    s.fpsBoxW = 22.0f;
-    s.fpsBoxH = 22.0f;
+    s.fpsBoxW = 136.0f;
+    s.fpsBoxH = 32.0f;
     s.fpsBoxX = s.panelX + 220.0f;
-    s.fpsBoxY = s.panelY + 164.0f;
-    s.fullscreenBoxW = 22.0f;
-    s.fullscreenBoxH = 22.0f;
+    s.fpsBoxY = s.panelY + 138.0f;
+    s.fullscreenBoxW = 136.0f;
+    s.fullscreenBoxH = 32.0f;
     s.fullscreenBoxX = s.panelX + 220.0f;
-    s.fullscreenBoxY = s.panelY + 206.0f;
+    s.fullscreenBoxY = s.panelY + 194.0f;
     s.backW = 140.0f;
     s.backH = 44.0f;
-    s.backX = s.panelX + s.panelW - s.backW - 24.0f;
+    s.backW = s.panelW - 24;
+    s.backX = s.panelX + 12;
     s.backY = s.panelY + s.panelH - s.backH - 20.0f;
     return s;
 }
@@ -1101,70 +1101,49 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
 void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Config &cfg, bool hoverBack,
                       bool hoverMinus, bool hoverPlus, bool hoverFps, bool hoverFullscreen)
 {
-    drawQuad(0, 0, static_cast<float>(winW), static_cast<float>(winH), 0.0f, 0.0f, 0.0f, 0.35f);
-    drawQuad(s.panelX, s.panelY, s.panelW, s.panelH, 0.05f, 0.06f, 0.08f, 0.92f);
-    drawOutline(s.panelX, s.panelY, s.panelW, s.panelH, 1.0f, 1.0f, 1.0f, 0.15f, 2.5f);
-
-    drawTextTiny(s.panelX + 20.0f, s.panelY + 30.0f, 4.0f, "Reglages", 1.0f, 0.97f, 0.9f, 1.0f);
-
-    drawTextTiny(s.panelX + 24.0f, s.panelY + 100.0f, 2.6f, "Sensibilite", 0.95f, 0.95f, 0.95f, 1.0f);
-    drawQuad(s.sensMinusX, s.sensMinusY, s.sensMinusW, s.sensMinusH, hoverMinus ? 0.3f : 0.18f, 0.18f, 0.18f, 0.9f);
-    drawOutline(s.sensMinusX, s.sensMinusY, s.sensMinusW, s.sensMinusH, 1.0f, 1.0f, 1.0f, 0.25f, hoverMinus ? 2.5f : 2.0f);
-    drawTextTiny(s.sensMinusX + 10.0f, s.sensMinusY + 10.0f, 3.0f, "-", 1.0f, 1.0f, 1.0f, 1.0f);
-    drawQuad(s.sensPlusX, s.sensPlusY, s.sensPlusW, s.sensPlusH, hoverPlus ? 0.3f : 0.18f, 0.18f, 0.18f, 0.9f);
-    drawOutline(s.sensPlusX, s.sensPlusY, s.sensPlusW, s.sensPlusH, 1.0f, 1.0f, 1.0f, 0.25f, hoverPlus ? 2.5f : 2.0f);
-    drawTextTiny(s.sensPlusX + 9.0f, s.sensPlusY + 10.0f, 3.0f, "+", 1.0f, 1.0f, 1.0f, 1.0f);
-    char sensBuf[64];
-    std::snprintf(sensBuf, sizeof(sensBuf), "%.3f", cfg.mouseSensitivity);
-    drawTextTiny(s.sensMinusX + 52.0f, s.sensMinusY + 12.0f, 2.6f, sensBuf, 1.0f, 0.98f, 0.92f, 1.0f);
-
-    drawTextTiny(s.panelX + 24.0f, s.panelY + 176.0f, 2.6f, "Afficher FPS", 0.95f, 0.95f, 0.95f, 1.0f);
-    drawQuad(s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH, hoverFps ? 0.3f : 0.18f, 0.18f, 0.18f, 0.9f);
-    drawOutline(s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH, 1.0f, 1.0f, 1.0f, 0.25f, hoverFps ? 2.5f : 2.0f);
-    if (cfg.showFps)
-        drawTextTiny(s.fpsBoxX + 5.0f, s.fpsBoxY + 5.0f, 2.4f, "X", 1.0f, 0.98f, 0.92f, 1.0f);
-
-    drawTextTiny(s.panelX + 24.0f, s.panelY + 212.0f, 2.6f, "Fenetration", 0.95f, 0.95f, 0.95f, 1.0f);
-    drawQuad(s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH, hoverFullscreen ? 0.3f : 0.18f,
-             0.18f, 0.18f, 0.9f);
-    drawOutline(s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH, 1.0f, 1.0f, 1.0f, 0.25f,
-                hoverFullscreen ? 2.5f : 2.0f);
-    if (cfg.fullscreenDefault)
-        drawTextTiny(s.fullscreenBoxX + 4.0f, s.fullscreenBoxY + 4.0f, 2.4f, "X", 1.0f, 0.98f, 0.92f, 1.0f);
-    drawTextTiny(s.fullscreenBoxX + 32.0f, s.fullscreenBoxY + 2.0f, 2.4f, cfg.fullscreenDefault ? "Plein ecran" : "Fenetre",
-                 1.0f, 0.98f, 0.92f, 1.0f);
-
-    drawQuad(s.backX, s.backY, s.backW, s.backH, hoverBack ? 0.24f : 0.16f, 0.16f, 0.18f, 0.92f);
-    drawOutline(s.backX, s.backY, s.backW, s.backH, 1.0f, 1.0f, 1.0f, 0.2f, hoverBack ? 3.0f : 2.0f);
-    drawTextTiny(s.backX + 22.0f, s.backY + 14.0f, 2.6f, "Retour", 1.0f, 0.98f, 0.92f, 1.0f);
+    drawQuad(0, 0, winW, winH, 0,0,0,0.20f);
+    signPosts(s.panelX,s.panelY,s.panelW,s.panelH-36);
+    signHeading(s.panelX,s.panelY,s.panelW,"REGLAGES");
+    for (float top : {s.sensMinusY-8, s.fpsBoxY-6, s.fullscreenBoxY-4})
+        signBoard(s.panelX+6,top,s.panelW-12,44);
+    signText(s.panelX+24, s.sensMinusY+12, 2, "SENSIBILITE SOURIS");
+    menuButton(s.sensMinusX,s.sensMinusY,s.sensMinusW,s.sensMinusH,"-",hoverMinus);
+    menuButton(s.sensPlusX,s.sensPlusY,s.sensPlusW,s.sensPlusH,"+",hoverPlus);
+    char value[16];
+    std::snprintf(value, sizeof(value), "%.3f", cfg.mouseSensitivity);
+    signText(s.sensMinusX+50, s.sensMinusY+12, 3, value);
+    signText(s.panelX+24, s.fpsBoxY+10, 2, "COMPTEUR FPS");
+    menuButton(s.fpsBoxX,s.fpsBoxY,s.fpsBoxW,s.fpsBoxH,cfg.showFps ? "ACTIVE" : "DESACTIVE",hoverFps,
+               cfg.showFps ? MenuAction::Primary : MenuAction::Normal);
+    signText(s.panelX+24, s.fullscreenBoxY+10, 2, "AFFICHAGE");
+    menuButton(s.fullscreenBoxX,s.fullscreenBoxY,s.fullscreenBoxW,s.fullscreenBoxH,
+               cfg.fullscreenDefault ? "PLEIN ECRAN" : "FENETRE",hoverFullscreen);
+    menuButton(s.backX, s.backY, s.backW, s.backH, "RETOUR", hoverBack, MenuAction::Normal);
 }
 
 void drawButtonEditBox(int winW, int winH, const std::string &valueText, const std::string &widthText, bool widthFocused)
 {
-    float boxW = 380.0f;
+    float boxW = std::min(450.0f, winW-32.0f);
     float boxH = 230.0f;
     float x = (winW - boxW) * 0.5f;
     float y = (winH - boxH) * 0.5f;
-    drawQuad(x - 6.0f, y - 6.0f, boxW + 12.0f, boxH + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f);
-    drawQuad(x, y, boxW, boxH, 0.05f, 0.05f, 0.06f, 0.9f);
-    drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+    menuPanel(x, y-25, boxW, boxH+50, "BOUTON");
     float textX = x + 18.0f;
-    float textY = y + 20.0f;
+    float textY = y + 44.0f;
 
     auto drawField = [&](const char *label, float yOffset, const std::string &txt, bool focused)
     {
-        drawTextTiny(textX, textY + yOffset, 2.0f, label, 1.0f, 0.95f, 0.85f, 1.0f);
+        signText(textX, textY + yOffset, 2.0f, label);
         float boxY = textY + yOffset + 22.0f;
         float outline = focused ? 0.55f : 0.25f;
-        drawQuad(textX, boxY, boxW - 36.0f, 36.0f, 0.12f, 0.12f, 0.14f, 0.85f);
+        drawQuad(textX, boxY, boxW - 36.0f, 36.0f, 0.20f, 0.12f, 0.06f, 0.92f);
         drawOutline(textX, boxY, boxW - 36.0f, 36.0f, 1.0f, 1.0f, 1.0f, outline, 2.0f);
         drawTextTiny(textX + 6.0f, boxY + 10.0f, 2.0f, txt.empty() ? "0" : txt, 1.0f, 1.0f, 1.0f, 1.0f);
     };
 
     drawField("Valeur du bouton (0-255)", 0.0f, valueText, !widthFocused);
     drawField("Largeur du bus (1-8 bits)", 68.0f, widthText, widthFocused);
-    drawTextTiny(textX, textY + 150.0f, 1.5f, "Tab pour changer de champ, Entrer pour valider, Esc pour annuler",
-                 0.85f, 0.85f, 0.85f, 1.0f);
+    signText(textX, textY + 150.0f, 1.5f, "TAB CHAMP   ENTREE VALIDER   ESC ANNULER");
 }
 
 void drawClockEditBox(int winW, int winH, const std::string &freqText)
@@ -1173,18 +1152,16 @@ void drawClockEditBox(int winW, int winH, const std::string &freqText)
     float boxH = 190.0f;
     float x = (winW - boxW) * 0.5f;
     float y = (winH - boxH) * 0.5f;
-    drawQuad(x - 6.0f, y - 6.0f, boxW + 12.0f, boxH + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f);
-    drawQuad(x, y, boxW, boxH, 0.05f, 0.05f, 0.06f, 0.9f);
-    drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+    menuPanel(x, y-25, boxW, boxH+50, "HORLOGE");
     float textX = x + 18.0f;
-    float textY = y + 20.0f;
+    float textY = y + 44.0f;
 
-    drawTextTiny(textX, textY, 2.0f, "Frequence clock (1-255)", 1.0f, 0.95f, 0.85f, 1.0f);
+    signText(textX, textY, 2.0f, "Frequence clock (1-255)");
     float boxY = textY + 22.0f;
-    drawQuad(textX, boxY, boxW - 36.0f, 36.0f, 0.12f, 0.12f, 0.14f, 0.85f);
+    drawQuad(textX, boxY, boxW - 36.0f, 36.0f, 0.20f, 0.12f, 0.06f, 0.92f);
     drawOutline(textX, boxY, boxW - 36.0f, 36.0f, 1.0f, 1.0f, 1.0f, 0.45f, 2.0f);
     drawTextTiny(textX + 6.0f, boxY + 10.0f, 2.0f, freqText.empty() ? "0" : freqText, 1.0f, 1.0f, 1.0f, 1.0f);
-    drawTextTiny(textX, textY + 90.0f, 1.5f, "Entrer pour valider, Esc pour annuler", 0.85f, 0.85f, 0.85f, 1.0f);
+    signText(textX, textY + 90.0f, 1.5f, "Entrer pour valider, Esc pour annuler");
 }
 
 void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value)
@@ -1193,20 +1170,18 @@ void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value)
     float boxH = 200.0f;
     float x = (winW - boxW) * 0.5f;
     float y = (winH - boxH) * 0.5f;
-    drawQuad(x - 6.0f, y - 6.0f, boxW + 12.0f, boxH + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f);
-    drawQuad(x, y, boxW, boxH, 0.05f, 0.05f, 0.06f, 0.92f);
-    drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+    menuPanel(x, y-25, boxW, boxH+50, "BUS");
 
     float textX = x + 18.0f;
-    float textY = y + 22.0f;
+    float textY = y + 46.0f;
 
     char buf[128];
     std::snprintf(buf, sizeof(buf), "Largeur du bus : %u bit%s", static_cast<unsigned>(width),
                   width > 1 ? "s" : "");
-    drawTextTiny(textX, textY, 2.2f, buf, 1.0f, 0.95f, 0.9f, 1.0f);
+    signText(textX, textY, 2.2f, buf);
 
     std::snprintf(buf, sizeof(buf), "Valeur decimale : %u", static_cast<unsigned>(value));
-    drawTextTiny(textX, textY + 28.0f, 2.0f, buf, 1.0f, 1.0f, 1.0f, 1.0f);
+    signText(textX, textY + 28.0f, 2.0f, buf);
 
     std::string bin;
     bin.reserve(width ? width : 8);
@@ -1214,40 +1189,34 @@ void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value)
     for (int i = static_cast<int>(w) - 1; i >= 0; --i)
         bin.push_back((value & (1u << i)) ? '1' : '0');
     std::snprintf(buf, sizeof(buf), "Valeur binaire : %s", bin.c_str());
-    drawTextTiny(textX, textY + 56.0f, 2.0f, buf, 1.0f, 1.0f, 1.0f, 1.0f);
+    signText(textX, textY + 56.0f, 2.0f, buf);
 
-    drawTextTiny(textX, textY + 100.0f, 1.5f, "Appuyer sur Esc pour fermer", 0.85f, 0.85f, 0.85f, 1.0f);
+    signText(textX, textY + 100.0f, 1.5f, "Appuyer sur Esc pour fermer");
 }
 
 void drawSplitterEditBox(int winW, int winH, bool isMerger, const std::string &widthText, bool order)
 {
-    float boxW = 380.0f;
+    float boxW = std::min(450.0f, winW-32.0f);
     float boxH = 200.0f;
     float x = (winW - boxW) * 0.5f;
     float y = (winH - boxH) * 0.5f;
-    drawQuad(x - 6.0f, y - 6.0f, boxW + 12.0f, boxH + 12.0f, 0.0f, 0.0f, 0.0f, 0.45f);
-    drawQuad(x, y, boxW, boxH, 0.05f, 0.05f, 0.06f, 0.92f);
-    drawOutline(x, y, boxW, boxH, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
+    menuPanel(x, y-25, boxW, boxH+50, isMerger ? "MERGER" : "SPLITTER");
     float textX = x + 18.0f;
     float textY = y + 18.0f;
 
-    drawTextTiny(textX, textY, 2.2f, isMerger ? "Merger" : "Splitter", 1.0f, 0.95f, 0.9f, 1.0f);
-    drawTextTiny(textX, textY + 26.0f, 1.6f,
-                 isMerger ? "B1 et B2 reunis vers BUS" : "BUS vers B1 et B2",
-                 0.9f, 0.9f, 0.9f, 1.0f);
+    signText(textX, textY + 26.0f, 1.6f,
+                 isMerger ? "B1 et B2 reunis vers BUS" : "BUS vers B1 et B2");
 
-    drawTextTiny(textX, textY + 52.0f, 2.0f, "Largeur B1 (1-7 bits)", 1.0f, 0.95f, 0.85f, 1.0f);
-    drawQuad(textX, textY + 68.0f, boxW - 36.0f, 32.0f, 0.12f, 0.12f, 0.14f, 0.85f);
+    signText(textX, textY + 52.0f, 2.0f, "Largeur B1 (1-7 bits)");
+    drawQuad(textX, textY + 68.0f, boxW - 36.0f, 32.0f, 0.20f, 0.12f, 0.06f, 0.92f);
     drawOutline(textX, textY + 68.0f, boxW - 36.0f, 32.0f, 1.0f, 1.0f, 1.0f, 0.25f, 2.0f);
     drawTextTiny(textX + 6.0f, textY + 76.0f, 2.0f, widthText.empty() ? "1" : widthText, 1.0f, 1.0f, 1.0f, 1.0f);
 
-    drawTextTiny(textX, textY + 110.0f, 2.0f,
+    signText(textX, textY + 110.0f, 2.0f,
                  isMerger ? (order ? "Ordre: B1 en bits de poids fort" : "Ordre: B1 en bits de poids faible")
-                          : (order ? "Ordre: B1 recoit les bits de poids fort" : "Ordre: B1 recoit les bits faibles"),
-                 0.95f, 0.95f, 0.95f, 1.0f);
+                          : (order ? "B1 RECOIT LES BITS FORTS" : "B1 RECOIT LES BITS FAIBLES"));
 
-    drawTextTiny(textX, textY + 140.0f, 1.5f, "Tab:inverse l'ordre, Entrer:valider, Esc:annuler",
-                 0.85f, 0.85f, 0.85f, 1.0f);
+    signText(textX, textY + 140.0f, 1.5f, "Tab:inverse l'ordre, Entrer:valider, Esc:annuler");
 }
 
 // ---------- Config ----------
@@ -1305,217 +1274,6 @@ void saveConfig(const Config &cfg)
 }
 
 // ---------- Save / Load ----------
-struct SaveHeader
-{
-    char magic[8] = {'B', 'U', 'L', 'L', 'D', 'O', 'G', '\0'};
-    uint32_t version = 10;
-    uint32_t w = 0, h = 0, d = 0;
-    uint32_t seed = 0;
-};
-
-bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
-{
-    std::filesystem::create_directories(std::filesystem::path(path).parent_path());
-    std::ofstream out(path, std::ios::binary);
-    if (!out)
-        return false;
-    SaveHeader hdr;
-    hdr.w = static_cast<uint32_t>(world.getWidth());
-    hdr.h = static_cast<uint32_t>(world.getHeight());
-    hdr.d = static_cast<uint32_t>(world.getDepth());
-    hdr.seed = seed;
-    out.write(reinterpret_cast<const char *>(&hdr), sizeof(hdr));
-    int total = world.totalSize();
-    for (int i = 0; i < total; ++i)
-    {
-        int x = i % world.getWidth();
-        int y = (i / world.getWidth()) / world.getDepth();
-        int z = (i / world.getWidth()) % world.getDepth();
-        uint8_t b = static_cast<uint8_t>(world.get(x, y, z));
-        uint8_t p = world.getPower(x, y, z);
-        uint8_t btn = world.getButtonState(x, y, z);
-        uint8_t btnVal = world.getButtonValue(x, y, z);
-        uint8_t btnWidth = world.getButtonWidth(x, y, z);
-        uint8_t splitWidth = world.getSplitterWidth(x, y, z);
-        uint8_t splitOrder = world.getSplitterOrder(x, y, z);
-        uint8_t clkFreq = world.getClockFreq(x, y, z);
-        out.write(reinterpret_cast<const char *>(&b), 1);
-        out.write(reinterpret_cast<const char *>(&p), 1);
-        out.write(reinterpret_cast<const char *>(&btn), 1);
-        out.write(reinterpret_cast<const char *>(&btnVal), 1);
-        out.write(reinterpret_cast<const char *>(&btnWidth), 1);
-        out.write(reinterpret_cast<const char *>(&splitWidth), 1);
-        out.write(reinterpret_cast<const char *>(&splitOrder), 1);
-        out.write(reinterpret_cast<const char *>(&clkFreq), 1);
-    }
-
-    // Save sign texts (only for version >= 2)
-    std::vector<std::pair<uint32_t, std::string>> signs;
-    signs.reserve(128);
-    for (int i = 0; i < total; ++i)
-    {
-        int x = i % world.getWidth();
-        int y = (i / world.getWidth()) / world.getDepth();
-        int z = (i / world.getWidth()) % world.getDepth();
-        if (world.get(x, y, z) != BlockType::Sign)
-            continue;
-        const std::string &txt = world.getSignText(x, y, z);
-        if (txt.empty())
-            continue;
-        signs.emplace_back(static_cast<uint32_t>(i), txt);
-    }
-    uint32_t signCount = static_cast<uint32_t>(signs.size());
-    out.write(reinterpret_cast<const char *>(&signCount), sizeof(signCount));
-    for (const auto &s : signs)
-    {
-        uint32_t idx = s.first;
-        const std::string &txt = s.second;
-        uint16_t len = static_cast<uint16_t>(std::min<size_t>(txt.size(), 65535));
-        out.write(reinterpret_cast<const char *>(&idx), sizeof(idx));
-        out.write(reinterpret_cast<const char *>(&len), sizeof(len));
-        if (len > 0)
-            out.write(txt.data(), len);
-    }
-    return static_cast<bool>(out);
-}
-
-bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seedOut)
-{
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
-        return false;
-    SaveHeader hdr{};
-    in.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));
-    if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
-        return false;
-    if (hdr.version != 1 && hdr.version != 2 && hdr.version != 3 && hdr.version != 4 && hdr.version != 5 &&
-        hdr.version != 6 && hdr.version != 7 && hdr.version != 8 && hdr.version != 9 && hdr.version != 10)
-        return false;
-    if (hdr.w != static_cast<uint32_t>(world.getWidth()) || hdr.h != static_cast<uint32_t>(world.getHeight()) ||
-        hdr.d != static_cast<uint32_t>(world.getDepth()))
-        return false;
-
-    int total = world.totalSize();
-    for (int i = 0; i < total; ++i)
-    {
-        uint8_t b = 0, p = 0, btn = 0, btnVal = 255;
-        uint8_t btnWidth = 0;
-        uint8_t splitWidth = 1;
-        uint8_t splitOrder = 0;
-        uint8_t clkFreq = 60;
-        in.read(reinterpret_cast<char *>(&b), 1);
-        in.read(reinterpret_cast<char *>(&p), 1);
-        in.read(reinterpret_cast<char *>(&btn), 1);
-        if (hdr.version >= 6)
-            in.read(reinterpret_cast<char *>(&btnVal), 1);
-        if (hdr.version >= 7)
-            in.read(reinterpret_cast<char *>(&btnWidth), 1);
-        if (hdr.version >= 9)
-        {
-            in.read(reinterpret_cast<char *>(&splitWidth), 1);
-            in.read(reinterpret_cast<char *>(&splitOrder), 1);
-        }
-        if (hdr.version >= 10)
-        {
-            in.read(reinterpret_cast<char *>(&clkFreq), 1);
-        }
-        else if (b == static_cast<uint8_t>(BlockType::Button))
-            btnWidth = 8; // legacy saves assume full 8-bit buttons
-        if (!in)
-            return false;
-
-        // Backward compatibility: versions 1–2 were saved before XorGate was inserted
-        // into the BlockType enum, so Led/Button/Wire/Sign indices moved.
-        if (hdr.version < 3)
-        {
-            // Old mapping:
-            // 13 = Led, 14 = Button, 15 = Wire, 16 = Sign
-            // New mapping:
-            // 14 = Led, 15 = Button, 16 = Wire, 17 = Sign
-            if (b == 13)
-                b = static_cast<uint8_t>(BlockType::Led);
-            else if (b == 14)
-                b = static_cast<uint8_t>(BlockType::Button);
-            else if (b == 15)
-                b = static_cast<uint8_t>(BlockType::Wire);
-            else if (b == 16)
-                b = static_cast<uint8_t>(BlockType::Sign);
-        }
-
-        int x = i % world.getWidth();
-        int y = (i / world.getWidth()) / world.getDepth();
-        int z = (i / world.getWidth()) % world.getDepth();
-        world.set(x, y, z, static_cast<BlockType>(b));
-        world.setPower(x, y, z, p);
-        world.setButtonState(x, y, z, btn);
-        if (b == static_cast<uint8_t>(BlockType::Button))
-        {
-            // For maps saved before version 8, force default 1-bit value = 1
-            if (hdr.version < 8)
-            {
-                btnWidth = 1;
-                btnVal = 1;
-            }
-            world.setButtonWidth(x, y, z, btnWidth == 0 ? 8 : btnWidth);
-            world.setButtonValue(x, y, z, btnVal);
-        }
-        if (b == static_cast<uint8_t>(BlockType::Splitter) || b == static_cast<uint8_t>(BlockType::Merger))
-        {
-            if (hdr.version < 9)
-            {
-                splitWidth = 1;
-                splitOrder = 0;
-            }
-            world.setSplitterWidth(x, y, z, splitWidth == 0 ? 1 : splitWidth);
-            world.setSplitterOrder(x, y, z, splitOrder);
-        }
-        if (b == static_cast<uint8_t>(BlockType::Clock))
-        {
-            if (hdr.version < 10)
-                clkFreq = 60;
-            world.setClockFreq(x, y, z, clkFreq == 0 ? 1 : clkFreq);
-        }
-    }
-
-    // Load sign texts for version >= 2
-    if (hdr.version >= 2)
-    {
-        uint32_t signCount = 0;
-        in.read(reinterpret_cast<char *>(&signCount), sizeof(signCount));
-        if (!in)
-            return false;
-        for (uint32_t i = 0; i < signCount; ++i)
-        {
-            uint32_t idx = 0;
-            uint16_t len = 0;
-            in.read(reinterpret_cast<char *>(&idx), sizeof(idx));
-            in.read(reinterpret_cast<char *>(&len), sizeof(len));
-            if (!in)
-                return false;
-            std::string txt;
-            txt.resize(len);
-            if (len > 0)
-            {
-                in.read(&txt[0], len);
-                if (!in)
-                    return false;
-            }
-            int x = static_cast<int>(idx % static_cast<uint32_t>(world.getWidth()));
-            int y = static_cast<int>((idx / static_cast<uint32_t>(world.getWidth())) /
-                                     static_cast<uint32_t>(world.getDepth()));
-            int z = static_cast<int>((idx / static_cast<uint32_t>(world.getWidth())) %
-                                     static_cast<uint32_t>(world.getDepth()));
-            if (world.inside(x, y, z) && world.get(x, y, z) == BlockType::Sign)
-            {
-                world.setSignText(x, y, z, txt);
-            }
-        }
-    }
-    seedOut = hdr.seed;
-    markAllChunksDirty();
-    return true;
-}
-
 std::string timestampSaveName()
 {
     auto now = std::chrono::system_clock::now();
@@ -1588,6 +1346,7 @@ std::string stemFromPath(const std::string &path);
 
 void refreshSaveList()
 {
+    saveOffset = 0;
     gSaveList.clear();
     gSaveIndex = -1;
     namespace fs = std::filesystem;
@@ -2159,6 +1918,8 @@ struct SlotHit
     int idx = -1;
 };
 
+constexpr float inventoryBarGap = 24.0f;
+
 SlotHit hitTestInventoryUI(int mx, int my, int winW, int winH)
 {
     const float slotSize = 54.0f;
@@ -2183,7 +1944,7 @@ SlotHit hitTestInventoryUI(int mx, int my, int winW, int winH)
 
     float hbWidth = padding * 2 + static_cast<float>(HOTBAR.size()) * slotSize + (HOTBAR.size() + 1) * gap;
     float hbX = (winW - hbWidth) * 0.5f;
-    float hbY = invY + invHeight + 40.0f;
+    float hbY = invY + invHeight + inventoryBarGap;
     for (int i = 0; i < static_cast<int>(HOTBAR.size()); ++i)
     {
         float x = hbX + padding + gap * (i + 1) + slotSize * i;
@@ -2206,21 +1967,13 @@ void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &invent
     float invX = (winW - invWidth) * 0.5f;
     float invY = (winH - invHeight) * 0.5f - 40.0f;
 
-    float panelX = invX - 22.0f;
-    float panelY = invY - 30.0f;
-    float panelW = invWidth + 44.0f;
-    float panelH = invHeight + 160.0f;
-    drawQuad(panelX + 12.0f, panelY + 14.0f, panelW, panelH, 0.0f, 0.0f, 0.0f, 0.32f);
-    drawQuad(panelX, panelY, panelW, panelH, 0.055f, 0.06f, 0.07f, 0.97f);
-    drawQuad(panelX, panelY, panelW, panelH * 0.38f, 0.1f, 0.11f, 0.13f, 0.55f);
-    for (int i = 0; i < 8; ++i)
-    {
-        float y = panelY + 18.0f + i * 11.0f;
-        drawQuad(panelX + 12.0f, y, panelW - 24.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.035f);
-    }
-    drawOutline(panelX, panelY, panelW, panelH, 0.95f, 0.95f, 0.95f, 0.22f, 3.0f);
-    drawOutline(panelX + 4.0f, panelY + 4.0f, panelW - 8.0f, panelH - 8.0f, 0.0f, 0.0f, 0.0f, 0.55f, 2.0f);
-    drawTextTiny(panelX + 26.0f, panelY + 16.0f, 2.2f, "INVENTAIRE", 0.98f, 0.98f, 0.95f, 1.0f);
+    float hbWidth = padding * 2 + static_cast<float>(hotbar.size()) * slotSize + (hotbar.size() + 1) * gap;
+    float hbX = (winW - hbWidth) * 0.5f;
+    float hbY = invY + invHeight + inventoryBarGap;
+    float panelW = std::max(invWidth, hbWidth) + 32;
+    float panelY = invY - 30;
+    drawQuad(0, 0, winW, winH, 0,0,0,0.18f);
+    menuPanel((winW-panelW)*0.5f, panelY, panelW, hbY+slotSize+2*padding-panelY, "INVENTAIRE");
 
     for (int row = 0; row < INV_ROWS; ++row)
     {
@@ -2242,18 +1995,7 @@ void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &invent
         }
     }
 
-    float hbWidth = padding * 2 + static_cast<float>(HOTBAR.size()) * slotSize + (HOTBAR.size() + 1) * gap;
-    float hbX = (winW - hbWidth) * 0.5f;
-    float hbY = invY + invHeight + 48.0f;
-    float hbPanelX = hbX - 14.0f;
-    float hbPanelY = hbY - 16.0f;
-    float hbPanelW = hbWidth + 28.0f;
-    float hbPanelH = slotSize + padding * 2 + 26.0f;
-    drawQuad(hbPanelX + 10.0f, hbPanelY + 12.0f, hbPanelW, hbPanelH, 0.0f, 0.0f, 0.0f, 0.32f);
-    drawQuad(hbPanelX, hbPanelY, hbPanelW, hbPanelH, 0.055f, 0.06f, 0.07f, 0.95f);
-    drawQuad(hbPanelX, hbPanelY, hbPanelW, hbPanelH * 0.4f, 0.1f, 0.11f, 0.13f, 0.5f);
-    drawOutline(hbPanelX, hbPanelY, hbPanelW, hbPanelH, 0.95f, 0.95f, 0.95f, 0.2f, 2.0f);
-    drawTextTiny(hbPanelX + 20.0f, hbPanelY + 10.0f, 1.9f, "HOTBAR", 0.92f, 0.92f, 0.88f, 1.0f);
+    signText(hbX + padding + gap, hbY-9, 2, "RACCOURCIS");
 
     for (int i = 0; i < static_cast<int>(HOTBAR.size()); ++i)
     {
@@ -2272,9 +2014,11 @@ void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &invent
     }
 }
 
-void setup3D(int w, int h)
+void setup3D(SDL_Window *window, int w, int h)
 {
-    glViewport(0, 0, w, h);
+    int pixelWidth, pixelHeight;
+    SDL_GL_GetDrawableSize(window, &pixelWidth, &pixelHeight);
+    glViewport(0, 0, pixelWidth, pixelHeight);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     gluPerspective(70.0, static_cast<double>(w) / static_cast<double>(h), 0.1, 500.0);
@@ -2338,7 +2082,7 @@ int main(int argc, char **argv)
     const float FLY_VERTICAL_MULT = 0.2f;
     const float SPRINT_DOUBLE_TAP = 0.3f;
 
-    gResourceRoot = resolveResourceRoot(argc > 0 ? argv[0] : "");
+    gResourceRoot = resolveResourceRoot(executableDirectory());
     gMapsDir = gResourceRoot / "maps";
     {
         std::error_code ec;
@@ -2347,6 +2091,10 @@ int main(int argc, char **argv)
 
     loadConfig(gConfig);
 
+#if defined(_WIN32) && defined(SDL_HINT_WINDOWS_DPI_SCALING)
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0)
     {
         std::cerr << "SDL init error: " << SDL_GetError() << "\n";
@@ -2388,6 +2136,16 @@ int main(int argc, char **argv)
     }
 
     createAtlasTexture();
+    GLuint titleImage = loadTextureFromBMP(assetPath("images/menu_title.bmp"), true);
+    GLuint pauseImage = loadTextureFromBMP(assetPath("images/menu_pause.bmp"), true);
+    if (!titleImage || !pauseImage)
+    {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Logicraft","Images du menu introuvables.",window);
+        SDL_GL_DeleteContext(ctx);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
     GLuint npcTexture = loadTextureFromBMP(assetPath("images/npc_head.bmp"));
     if (npcTexture == 0)
     {
@@ -2492,7 +2250,7 @@ int main(int argc, char **argv)
 
     int winW = 1280, winH = 720;
     SDL_GetWindowSize(window, &winW, &winH);
-    setup3D(winW, winH);
+    setup3D(window, winW, winH);
 
     while (running)
     {
@@ -2693,6 +2451,7 @@ int main(int argc, char **argv)
                 else if (gSignEditOpen && (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
                 {
                     world.setSignText(gSignEditX, gSignEditY, gSignEditZ, gSignEditBuffer);
+                    markChunkFromBlock(gSignEditX, gSignEditY, gSignEditZ);
                     gSignEditOpen = false;
                     SDL_StopTextInput();
                 }
@@ -2904,6 +2663,12 @@ int main(int argc, char **argv)
             }
             else if (e.type == SDL_MOUSEWHEEL)
             {
+                if (saveMenuOpen)
+                {
+                    int delta = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
+                    saveOffset = std::clamp(saveOffset-delta, 0, std::max(0, static_cast<int>(gSaveList.size())-saveRows));
+                    continue;
+                }
                 if (gSplitterEditOpen || gButtonEditOpen || gSignEditOpen || gWireInfoOpen || gClockEditOpen)
                     continue;
                 if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !gMainMenuOpen && !gSettingsMenuOpen)
@@ -2927,7 +2692,7 @@ int main(int argc, char **argv)
             {
                 winW = e.window.data1;
                 winH = e.window.data2;
-                setup3D(winW, winH);
+                setup3D(window, winW, winH);
             }
             else if (e.type == SDL_TEXTINPUT)
             {
@@ -3006,7 +2771,7 @@ int main(int argc, char **argv)
             {
                 if (gMainMenuOpen)
                 {
-                    MainMenuLayout l = computeMainMenuLayout(winW, winH);
+
                     if (gSettingsMenuOpen)
                     {
                         SettingsMenuLayout s = computeSettingsLayout(winW, winH);
@@ -3042,10 +2807,9 @@ int main(int argc, char **argv)
                         }
                         continue;
                     }
-                    bool hoverPlay = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.playX, l.playY, l.playW, l.playH);
-                    bool hoverSettings = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.settingsX, l.settingsY, l.settingsW, l.settingsH);
-                    bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY, l.quitW, l.quitH);
-                    if (hoverPlay)
+                    if (e.button.button != SDL_BUTTON_LEFT) continue;
+                    int sign = MenuImageLayout(winW,winH).signAt(e.button.x,e.button.y,false);
+                    if (sign == 0)
                     {
                         gMainMenuOpen = false;
                         gSettingsMenuOpen = false;
@@ -3053,11 +2817,11 @@ int main(int argc, char **argv)
                         SDL_ShowCursor(SDL_FALSE);
                         smoothDX = smoothDY = 0.0f;
                     }
-                    else if (hoverSettings)
+                    else if (sign == 1)
                     {
                         gSettingsMenuOpen = true;
                     }
-                    else if (hoverQuit)
+                    else if (sign == 2)
                     {
                         running = false;
                     }
@@ -3127,8 +2891,8 @@ int main(int argc, char **argv)
                         if (pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.listX, sm.listY,
                                         sm.listW, sm.listH))
                         {
-                            float relY = static_cast<float>(mouseY) - sm.listY - 8.0f;
-                            int idx = static_cast<int>(relY / 20.0f);
+                            float relY = static_cast<float>(mouseY) - sm.listY;
+                            int idx = saveOffset + static_cast<int>(relY / saveRowHeight);
                             if (idx >= 0 && idx < static_cast<int>(gSaveList.size()))
                                 gSaveIndex = idx;
                             gSaveInputFocus = false;
@@ -3148,19 +2912,29 @@ int main(int argc, char **argv)
                         if (hoverCreate)
                         {
                             std::string path = buildSavePathFromInput(gSaveNameInput);
+                            std::error_code lookupError;
+                            if (std::filesystem::exists(path, lookupError))
+                            {
+                                saveStatus = "CE NOM EXISTE DEJA";
+                                continue;
+                            }
                             bool ok = saveWorldToFile(world, path, seed);
+                            saveStatus = ok ? "CARTE ENREGISTREE" : "ECHEC DE LA SAUVEGARDE";
                             std::cout << (ok ? "Sauvegarde OK: " : "Sauvegarde KO: ") << path << "\n";
                             if (ok)
                             {
                                 refreshSaveList();
                                 int idx = findSaveIndexByStem(stemFromPath(path));
                                 if (idx >= 0)
+                                {
                                     gSaveIndex = idx;
+                                    saveOffset = std::max(0, idx-saveRows+1);
+                                }
                                 gSaveNameInput = normalizeSaveInput(stemFromPath(path));
                                 gSaveInputFocus = false;
                             }
                         }
-                        else if (hoverOverwrite)
+                        else if (hoverOverwrite && gSaveIndex >= 0)
                         {
                             std::string path;
                             if (gSaveIndex >= 0 && gSaveIndex < static_cast<int>(gSaveList.size()))
@@ -3168,6 +2942,7 @@ int main(int argc, char **argv)
                             else
                                 path = timestampSaveName();
                             bool ok = saveWorldToFile(world, path, seed);
+                            saveStatus = ok ? "CARTE ENREGISTREE" : "ECHEC DE LA SAUVEGARDE";
                             std::cout << (ok ? "Sauvegarde OK: " : "Sauvegarde KO: ") << path << "\n";
                             if (ok)
                             {
@@ -3185,12 +2960,14 @@ int main(int argc, char **argv)
                                 bool ok = loadWorldFromFile(world, path, newSeed);
                                 if (ok)
                                 {
+                                    markAllChunksDirty();
                                     seed = newSeed;
                                     player.x = WIDTH * 0.5f;
                                     player.z = DEPTH * 0.5f;
                                     player.y =
                                         world.surfaceY(static_cast<int>(player.x), static_cast<int>(player.z)) + 0.2f;
                                 }
+                                saveStatus = ok ? "CARTE CHARGEE" : "ECHEC DU CHARGEMENT";
                                 std::cout << (ok ? "Chargement OK: " : "Chargement KO: ") << path << "\n";
                             }
                         }
@@ -3202,34 +2979,28 @@ int main(int argc, char **argv)
                     }
                     else
                     {
-                        PauseMenuLayout l = computePauseLayout(winW, winH);
-                        bool hoverResume = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.resumeX,
-                                                       l.resumeY, l.resumeW, l.resumeH);
-                        bool hoverManage = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.manageX,
-                                                       l.manageY, l.manageW, l.manageH);
-                        bool hoverSettings = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.settingsX,
-                                                         l.settingsY, l.settingsW, l.settingsH);
-                        bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX,
-                                                     l.quitY, l.quitW, l.quitH);
-                        if (hoverQuit)
+                        if (e.button.button != SDL_BUTTON_LEFT) continue;
+                        int sign = MenuImageLayout(winW,winH).signAt(e.button.x,e.button.y,true);
+                        if (sign == 3)
                         {
                             running = false;
                         }
-                        else if (hoverSettings)
+                        else if (sign == 2)
                         {
                             gSettingsMenuOpen = true;
                             saveMenuOpen = false;
                         }
-                        else if (hoverManage)
+                        else if (sign == 1)
                         {
                             saveMenuOpen = true;
+                            saveStatus.clear();
                             SDL_StartTextInput();
                             refreshSaveList();
                             if (gSaveNameInput.empty())
                                 gSaveNameInput = normalizeSaveInput(stemFromPath(timestampSaveName()));
                             gSaveInputFocus = true;
                         }
-                        else if (hoverResume)
+                        else if (sign == 0)
                         {
                             pauseMenuOpen = false;
                             saveMenuOpen = false;
@@ -3444,28 +3215,14 @@ int main(int argc, char **argv)
         updateNpc(npc, world, simDt);
         updateNpc(npc2, world, simDt);
         updateNpc(npc3, world, simDt);
-        updateLogic(world);
-
-        glClearColor(0.55f, 0.75f, 0.95f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        if (gMainMenuOpen)
+        if (gMainMenuOpen || pauseMenuOpen)
         {
-            beginHud(winW, winH);
-            MainMenuLayout l = computeMainMenuLayout(winW, winH);
-            bool hoverPlay = false;
-            bool hoverSettings = false;
-            bool hoverQuit = false;
-            if (!gSettingsMenuOpen)
-            {
-                hoverPlay = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.playX, l.playY, l.playW,
-                                        l.playH);
-                hoverSettings = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.settingsX, l.settingsY,
-                                            l.settingsW, l.settingsH);
-                hoverQuit =
-                    pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY, l.quitW, l.quitH);
-            }
-            drawMainMenu(winW, winH, l, hoverPlay, hoverSettings, hoverQuit, elapsedTime);
+            glClearColor(0.025f,0.025f,0.025f,1);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            beginHud(winW,winH);
+            MenuImageLayout layout(winW,winH);
+            int hovered = gSettingsMenuOpen || saveMenuOpen ? -1 : layout.signAt(mouseX,mouseY,pauseMenuOpen);
+            drawMenuImage(layout, pauseMenuOpen ? pauseImage : titleImage, hovered);
             if (gSettingsMenuOpen)
             {
                 SettingsMenuLayout s = computeSettingsLayout(winW, winH);
@@ -3482,16 +3239,33 @@ int main(int argc, char **argv)
                                              s.backH);
                 drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
             }
+            else if (saveMenuOpen)
+            {
+                SaveMenuLayout sm = computeSaveMenuLayout(winW, winH);
+                bool hoverOverwrite = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.overwriteX,
+                                                  sm.overwriteY, sm.overwriteW, sm.overwriteH);
+                bool hoverLoad = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.loadX, sm.loadY,
+                                             sm.loadW, sm.loadH);
+                bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.backX, sm.backY,
+                                             sm.backW, sm.backH);
+                bool hoverCreate =
+                    pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.createX, sm.createY, sm.createW,
+                                sm.createH);
+                drawSaveMenu(winW, winH, sm, gSaveIndex, hoverCreate, hoverOverwrite, hoverLoad, hoverBack, gSaveNameInput);
+            }
             endHud();
             SDL_GL_SwapWindow(window);
             updateTitle(window);
             continue;
         }
 
+        updateLogic(world, markChunkFromBlock);
+        glClearColor(0.55f, 0.75f, 0.95f, 1);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glLoadIdentity();
         Vec3 fwdView = forwardVec(player.yaw, player.pitch);
-        gluLookAt(player.x, player.y + EYE_HEIGHT, player.z, player.x + fwdView.x, player.y + EYE_HEIGHT + fwdView.y,
-                  player.z + fwdView.z, 0.0f, 1.0f, 0.0f);
+        gluLookAt(player.x, player.y+EYE_HEIGHT, player.z, player.x+fwdView.x,
+                  player.y+EYE_HEIGHT+fwdView.y, player.z+fwdView.z, 0,1,0);
 
         drawSkybox(skyboxTex, 160.0f);
 
@@ -3597,57 +3371,13 @@ int main(int argc, char **argv)
             drawTextTiny(16.0f, 16.0f, 2.4f, fpsBuf, 1.0f, 0.97f, 0.9f, 1.0f);
         }
         if (!inventoryOpen && !pauseMenuOpen)
+        {
             drawCrosshair(winW, winH);
-        drawInventoryBar(winW, winH, hotbarSlots, selected);
+            drawInventoryBar(winW, winH, hotbarSlots, selected);
+        }
         if (inventoryOpen)
             drawInventoryPanel(winW, winH, inventorySlots, hotbarSlots, pendingSlot, pendingIsHotbar, mouseX, mouseY,
                                hoverLabel);
-        if (pauseMenuOpen)
-        {
-            if (gSettingsMenuOpen)
-            {
-                SettingsMenuLayout s = computeSettingsLayout(winW, winH);
-                bool hoverMinus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensMinusX,
-                                              s.sensMinusY, s.sensMinusW, s.sensMinusH);
-                bool hoverPlus = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.sensPlusX, s.sensPlusY,
-                                             s.sensPlusW, s.sensPlusH);
-                bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY,
-                                            s.fpsBoxW, s.fpsBoxH);
-                bool hoverFullscreen =
-                    pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY,
-                                s.fullscreenBoxW, s.fullscreenBoxH);
-                bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW,
-                                             s.backH);
-                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
-            }
-            else if (saveMenuOpen)
-            {
-                SaveMenuLayout sm = computeSaveMenuLayout(winW, winH);
-                bool hoverOverwrite = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.overwriteX,
-                                                  sm.overwriteY, sm.overwriteW, sm.overwriteH);
-                bool hoverLoad = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.loadX, sm.loadY,
-                                             sm.loadW, sm.loadH);
-                bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.backX, sm.backY,
-                                             sm.backW, sm.backH);
-                bool hoverCreate =
-                    pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.createX, sm.createY, sm.createW,
-                                sm.createH);
-                drawSaveMenu(winW, winH, sm, gSaveIndex, hoverCreate, hoverOverwrite, hoverLoad, hoverBack, gSaveNameInput);
-            }
-            else
-            {
-                PauseMenuLayout l = computePauseLayout(winW, winH);
-                bool hoverResume = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.resumeX, l.resumeY,
-                                               l.resumeW, l.resumeH);
-                bool hoverManage = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.manageX, l.manageY,
-                                               l.manageW, l.manageH);
-                bool hoverSettings = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.settingsX, l.settingsY,
-                                                 l.settingsW, l.settingsH);
-                bool hoverQuit = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), l.quitX, l.quitY, l.quitW,
-                                             l.quitH);
-                drawPauseMenu(winW, winH, l, hoverResume, hoverManage, hoverSettings, hoverQuit);
-            }
-        }
         if (hoverLabel.valid)
             drawTooltip(hoverLabel.x, hoverLabel.y, winW, winH, hoverLabel.text);
         if (gSignEditOpen)
@@ -3676,6 +3406,8 @@ int main(int argc, char **argv)
         updateTitle(window);
     }
 
+    glDeleteTextures(1,&titleImage);
+    glDeleteTextures(1,&pauseImage);
     SDL_GL_DeleteContext(ctx);
     SDL_DestroyWindow(window);
     SDL_Quit();

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "types.hpp"
+#include "world_types.hpp"
 
 #include <map>
 #include <vector>
@@ -16,6 +16,8 @@ bool occludesFaces(BlockType b);
 class World
 {
 public:
+    uint64_t tick() const { return simulationTick; }
+    void setTick(uint64_t value) { simulationTick = value; }
     World(int w, int h, int d);
 
     BlockType get(int x, int y, int z) const;
@@ -51,6 +53,7 @@ public:
     void setSignText(int x, int y, int z, const std::string &text);
 
 private:
+    uint64_t simulationTick = 0;
     int width;
     int height;
     int depth;
@@ -71,4 +74,4 @@ HitInfo raycast(const World &world, float ox, float oy, float oz, float dx, floa
 bool collidesAt(const World &world, float px, float py, float pz, float playerHeight);
 bool blockIntersectsPlayer(const Player &player, int bx, int by, int bz, float playerHeight);
 
-void updateLogic(World &world);
+void updateLogic(World &world, void (*onChange)(int, int, int) = nullptr);

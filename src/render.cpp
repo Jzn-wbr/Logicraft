@@ -670,7 +670,7 @@ void fillCounterTopTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const 
                        textB, 255);
 }
 
-GLuint loadTextureFromBMP(const std::string &path)
+GLuint loadTextureFromBMP(const std::string &path, bool mipmaps)
 {
     SDL_Surface *surf = SDL_LoadBMP(path.c_str());
     if (!surf)
@@ -689,7 +689,9 @@ GLuint loadTextureFromBMP(const std::string &path)
     GLuint tex = 0;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    if (mipmaps)
+        glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -949,9 +951,9 @@ void createAtlasTexture()
     auto base = [&](BlockType b)
     { return BLOCKS.at(b).color; };
 
-    fillGrassSideTile(pixels, texW, gBlockTile[BlockType::Grass], gBlockTile[BlockType::Dirt], {0.16f, 0.42f, 0.18f},
+    fillGrassSideTile(pixels, texW, gBlockTile[BlockType::Grass], gBlockTile[BlockType::Dirt], {0.29f, 0.39f, 0.24f},
                       base(BlockType::Dirt));
-    fillTile(pixels, texW, gGrassTopTile, {0.16f, 0.42f, 0.18f}, 3);
+    fillTile(pixels, texW, gGrassTopTile, {0.29f, 0.39f, 0.24f}, 3);
     fillTile(pixels, texW, gBlockTile[BlockType::Dirt], base(BlockType::Dirt), 4);
     fillStoneBrickTile(pixels, texW, gBlockTile[BlockType::Stone], base(BlockType::Stone));
     fillWoodTile(pixels, texW, gBlockTile[BlockType::Wood], base(BlockType::Wood));
@@ -1023,7 +1025,10 @@ void createAtlasTexture()
         glGenTextures(1, &gAtlasTex);
     }
     glBindTexture(GL_TEXTURE_2D, gAtlasTex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    // Keep at least four texels per tile to avoid blending unrelated atlas tiles.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 3);
+    glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1788,7 +1793,13 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     addFace(x, y, z, 0, -1, 0, color, faceTile(0, -1, 0), emissive, isGlass);
                 if (y == world.getHeight() - 1 ||
                     (!occludesFaces(world.get(x, y + 1, z)) && !(isGlass && neighborIsGlass(x, y + 1, z))))
-                    addFace(x, y, z, 0, 1, 0, color, faceTile(0, 1, 0), emissive, isGlass);
+                {
+                    int top = faceTile(0, 1, 0);
+                    // Printed labels already carry their component colour in the atlas.
+                    bool printed = top != tIdx && b != BlockType::Grass;
+                    std::array<float, 3> neutral = {brightness, brightness, brightness};
+                    addFace(x, y, z, 0, 1, 0, printed ? neutral : color, top, emissive, isGlass);
+                }
                 if (z == 0 || (!occludesFaces(world.get(x, y, z - 1)) && !(isGlass && neighborIsGlass(x, y, z - 1))))
                     addFace(x, y, z, 0, 0, -1, color, faceTile(0, 0, -1), emissive, isGlass);
                 if (z == world.getDepth() - 1 ||

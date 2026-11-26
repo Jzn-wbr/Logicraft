@@ -14,55 +14,7 @@
 #include <string>
 #include <vector>
 
-enum class BlockType
-{
-    Air,
-    Grass,
-    Dirt,
-    Stone,
-    Wood,
-    Leaves,
-    Water,
-    Plank,
-    Sand,
-    Glass,
-    AndGate,
-    OrGate,
-    NotGate,
-    XorGate,
-    Led,
-    Button,
-    Wire,
-    Sign,
-    DFlipFlop,
-    AddGate,
-    Counter,
-    Splitter,
-    Merger,
-    Decoder,
-    Multiplexer,
-    Comparator,
-    Clock
-};
-
-struct BlockInfo
-{
-    std::string name;
-    bool solid;
-    std::array<float, 3> color;
-};
-
-struct Player
-{
-    float x = 0.0f;
-    float y = 20.0f;
-    float z = 0.0f;
-    float yaw = 0.0f;
-    float pitch = 0.0f;
-    float vx = 0.0f;
-    float vy = 0.0f;
-    float vz = 0.0f;
-};
+#include "world_types.hpp"
 
 struct NPC
 {
@@ -83,14 +35,6 @@ struct ItemStack
     int count = 0;
 };
 
-struct PauseMenuLayout
-{
-    float panelX = 0.0f, panelY = 0.0f, panelW = 0.0f, panelH = 0.0f;
-    float resumeX = 0.0f, resumeY = 0.0f, resumeW = 0.0f, resumeH = 0.0f;
-    float manageX = 0.0f, manageY = 0.0f, manageW = 0.0f, manageH = 0.0f;
-    float settingsX = 0.0f, settingsY = 0.0f, settingsW = 0.0f, settingsH = 0.0f;
-    float quitX = 0.0f, quitY = 0.0f, quitW = 0.0f, quitH = 0.0f;
-};
 
 struct SaveMenuLayout
 {
@@ -130,11 +74,4 @@ struct ChunkMesh
 struct Vec3
 {
     float x, y, z;
-};
-
-struct HitInfo
-{
-    int x, y, z;
-    int nx, ny, nz;
-    bool hit;
 };

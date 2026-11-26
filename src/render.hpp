@@ -51,7 +51,7 @@ void markNeighborsDirty(int x, int y, int z);
 void ensureVbo(GLuint &vbo);
 int tileIndexFor(BlockType b);
 void createAtlasTexture();
-GLuint loadTextureFromBMP(const std::string &path);
+GLuint loadTextureFromBMP(const std::string &path, bool mipmaps = false);
 GLuint loadCubemapFromBMP(const std::array<std::string, 6> &paths);
 void buildChunkMesh(const World &world, int cx, int cy, int cz);
 void drawNpcBlocky(const NPC &npc);
