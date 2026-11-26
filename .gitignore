@@ -9,3 +9,5 @@ vcpkg_installed/
 *.user
 *.sln
 *.exe
+/maps/recuperation-*.bulldog
+/maps/*.bulldog.hotbar

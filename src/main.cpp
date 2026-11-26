@@ -7,9 +7,13 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <commdlg.h>
 #endif
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
+#ifdef _WIN32
+#include <SDL2/SDL_syswm.h>
+#endif
 #include <SDL2/SDL_opengl.h>
 #include <GL/glu.h>
 #include <algorithm>
@@ -22,12 +26,17 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
+#include "circuit_ports.hpp"
+#include "edit_history.hpp"
 #include "snapshot.hpp"
 #include "render.hpp"
 #include "types.hpp"
@@ -73,8 +82,10 @@ std::string assetPath(const std::string &relative)
 }
 
 void drawTextTiny(float x, float y, float size, const std::string &text, float r, float g, float b, float a);
+bool pointInRect(float mx, float my, float x, float y, float w, float h);
 std::string stemFromPath(const std::string &path);
 std::string saveStatus;
+std::vector<std::string> saveDates;
 extern bool gSaveInputFocus;
 extern std::vector<std::string> gSaveList;
 extern int gSaveIndex;
@@ -668,7 +679,7 @@ void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize);
 
 void drawInventoryBar(int winW, int winH, const std::vector<ItemStack> &hotbar, int selected)
 {
-    const int slotCount = static_cast<int>(HOTBAR.size());
+    const int slotCount = static_cast<int>(hotbarSize);
     const float slotSize = 54.0f;
     const float gap = 10.0f;
     const float padding = 16.0f;
@@ -797,14 +808,15 @@ void menuPanel(float x, float y, float w, float h, const char *title)
 }
 
 void menuButton(float x, float y, float w, float h, const char *label, bool hover,
-                MenuAction action = MenuAction::Normal)
+                MenuAction action = MenuAction::Normal, float maxTextSize = 3.0f)
 {
     bool enabled = action != MenuAction::Disabled;
     signBoard(x,y,w,h,enabled ? 1.04f : 0.65f);
     if (hover && enabled)
         drawOutline(x+1,y+1,w-2,h-2,0.99f,0.85f,0.33f,1,2);
-    float size = w < 145 ? 2 : 3;
-    float tw = (std::strlen(label)*4.8f-0.8f)*size;
+    const float labelWidth = std::max(1.0f, std::strlen(label) * 4.8f - 0.8f);
+    const float size = std::min({maxTextSize, w < 145 ? 2.0f : 3.0f, (w - 12.0f) / labelWidth});
+    const float tw = labelWidth * size;
     signText(std::round(x+(w-tw)/2),std::round(y+(h-5*size)/2),size,label);
 }
 
@@ -823,7 +835,7 @@ SaveMenuLayout computeSaveMenuLayout(int winW, int winH)
     SaveMenuLayout s;
     s.panelW = 560.0f;
     int visibleRows = std::clamp(static_cast<int>(gSaveList.size()), 1, saveRows);
-    s.panelH = 400.0f - (saveRows-visibleRows)*saveRowHeight;
+    s.panelH = 500.0f - (saveRows-visibleRows)*saveRowHeight;
     s.panelX = menuDockX(winW, s.panelW);
     s.panelY = (winH - s.panelH) * 0.5f;
 
@@ -860,8 +872,14 @@ SaveMenuLayout computeSaveMenuLayout(int winW, int winH)
     return s;
 }
 
+std::pair<float, float> saveActionPosition(const SaveMenuLayout &layout, int index)
+{
+    return {layout.createX + (index % 4) * (layout.createW + 12.0f), layout.createY + 60.0f + (index / 4) * 42.0f};
+}
+
 void drawSaveMenu(int winW, int winH, const SaveMenuLayout &s, int highlightedIndex, bool hoverCreate,
-                  bool hoverOverwrite, bool hoverLoad, bool hoverBack, const std::string &inputName)
+                  bool hoverOverwrite, bool hoverLoad, bool hoverBack, const std::string &inputName,
+                  int mouseX, int mouseY)
 {
     drawQuad(0.0f, 0.0f, static_cast<float>(winW), static_cast<float>(winH), 0,0,0,0.18f);
     signPosts(s.panelX,s.panelY,s.panelW,s.panelH-44);
@@ -880,9 +898,10 @@ void drawSaveMenu(int winW, int winH, const SaveMenuLayout &s, int highlightedIn
         signBoard(s.listX,y,s.listW,saveRowHeight-3);
         if (i == highlightedIndex)
             drawOutline(s.listX,y,s.listW,saveRowHeight-3,0.99f,0.85f,0.33f,1,2);
-        signText(s.listX+15,y+5,2,stemFromPath(gSaveList[i]).substr(0,45));
+        signText(s.listX+15,y+5,2,stemFromPath(gSaveList[i]).substr(0,34));
+        signText(s.listX+s.listW-92,y+5,2,saveDates[i]);
     }
-    signText(s.inputX,s.inputY-19,2,"NOM DE LA NOUVELLE CARTE");
+    signText(s.inputX,s.inputY-19,2,"NOM POUR ENREGISTRER SOUS");
     signText(s.listX,s.panelY+s.panelH-26,2,saveStatus);
     // input field
     drawQuad(s.inputX, s.inputY, s.inputW, s.inputH, 0.20f, 0.12f, 0.06f, 0.92f);
@@ -904,10 +923,18 @@ void drawSaveMenu(int winW, int winH, const SaveMenuLayout &s, int highlightedIn
             drawQuad(caretX + 2.0f, textY, 2.0f, caretH, 1.0f, 1.0f, 1.0f, 0.9f);
     }
 
-    menuButton(s.createX, s.createY, s.createW, s.createH, "CREER", hoverCreate, MenuAction::Normal);
+    menuButton(s.createX, s.createY, s.createW, s.createH, "ENREG. SOUS", hoverCreate, MenuAction::Normal);
     menuButton(s.overwriteX, s.overwriteY, s.overwriteW, s.overwriteH, "ECRASER", hoverOverwrite, highlightedIndex < 0 ? MenuAction::Disabled : MenuAction::Caution);
     menuButton(s.loadX, s.loadY, s.loadW, s.loadH, "CHARGER", hoverLoad, highlightedIndex < 0 ? MenuAction::Disabled : MenuAction::Primary);
     menuButton(s.backX, s.backY, s.backW, s.backH, "RETOUR", hoverBack, MenuAction::Normal);
+    static constexpr const char *labels[] = {
+        "ENREGISTRER", "NOUVELLE", "RENOMMER", "DUPLIQUER", "REPRENDRE", "IMPORTER", "EXPORTER", "TUTORIEL"};
+    for (int i = 0; i < 8; ++i)
+    {
+        auto [x, y] = saveActionPosition(s, i);
+        menuButton(x, y, s.createW, 36.0f, labels[i],
+                   pointInRect(mouseX, mouseY, x, y, s.createW, 36.0f));
+    }
 }
 
 bool pointInRect(float mx, float my, float x, float y, float w, float h)
@@ -985,6 +1012,15 @@ struct Config
     bool fullscreenDefault = false;
     bool showFps = false;
     bool vsync = true;
+    bool invertY = false;
+    bool smoothCamera = true;
+    bool toggleSprint = false;
+    bool highContrast = false;
+    int fov = 70;
+    int uiSize = 100;
+    int keyboardProfile = 0;
+    std::array<SDL_Keycode, 4> movement{};
+    std::array<SDL_Keycode, 4> actions{SDLK_e, SDLK_UNKNOWN, SDLK_r, SDLK_t};
 };
 
 // Pixel coordinates on the 1280 x 720 captures. The first three boards
@@ -1071,7 +1107,7 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
 {
     SettingsMenuLayout s{};
     s.panelW = 520.0f;
-    s.panelH = 340.0f;
+    s.panelH = 510.0f;
     s.panelX = menuDockX(winW, s.panelW);
     s.panelY = (static_cast<float>(winH) - s.panelH) * 0.5f;
     s.sensMinusW = 36.0f;
@@ -1098,8 +1134,39 @@ SettingsMenuLayout computeSettingsLayout(int winW, int winH)
     return s;
 }
 
+const char *movementLabel(int i)
+{
+    static constexpr const char *names[] = {"AVANCER", "RECULER", "GAUCHE", "DROITE",
+                                            "INVENTAIRE", "BLOC", "RETOUR DEPART", "TOURNER"};
+    return names[i];
+}
+
+std::pair<SDL_Keycode, SDL_Keycode> movementKeys(const Config &cfg, int index)
+{
+    if (index >= 4)
+    {
+        SDL_Keycode key = cfg.actions[index - 4];
+        if (index == 5 && key == SDLK_UNKNOWN)
+            key = cfg.keyboardProfile == 2 || cfg.movement[2] == SDLK_q ? SDLK_f : SDLK_q;
+        return {key, SDLK_UNKNOWN};
+    }
+    if (cfg.movement[index])
+        return {cfg.movement[index], SDLK_UNKNOWN};
+    if (index == 0)
+        return {cfg.keyboardProfile == 2 ? SDLK_z : SDLK_w, cfg.keyboardProfile == 0 ? SDLK_z : SDLK_UNKNOWN};
+    if (index == 2)
+        return {cfg.keyboardProfile == 2 ? SDLK_q : SDLK_a, SDLK_UNKNOWN};
+    return {index == 1 ? SDLK_s : SDLK_d, SDLK_UNKNOWN};
+}
+
+std::pair<float, float> settingsOptionPosition(const SettingsMenuLayout &layout, int index)
+{
+    return {layout.panelX + 14.0f + (index % 3) * 165.0f, layout.panelY + 239.0f + (index / 3) * 33.0f};
+}
+
 void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Config &cfg, bool hoverBack,
-                      bool hoverMinus, bool hoverPlus, bool hoverFps, bool hoverFullscreen)
+                      bool hoverMinus, bool hoverPlus, bool hoverFps, bool hoverFullscreen,
+                      int mouseX, int mouseY, int binding, const std::string &bindingStatus)
 {
     drawQuad(0, 0, winW, winH, 0,0,0,0.20f);
     signPosts(s.panelX,s.panelY,s.panelW,s.panelH-36);
@@ -1118,6 +1185,25 @@ void drawSettingsMenu(int winW, int winH, const SettingsMenuLayout &s, const Con
     signText(s.panelX+24, s.fullscreenBoxY+10, 2, "AFFICHAGE");
     menuButton(s.fullscreenBoxX,s.fullscreenBoxY,s.fullscreenBoxW,s.fullscreenBoxH,
                cfg.fullscreenDefault ? "PLEIN ECRAN" : "FENETRE",hoverFullscreen);
+    static constexpr const char *profiles[] = {"AUTO", "QWERTY", "AZERTY"};
+    const std::string labels[] = {
+        "VISION " + std::to_string(cfg.fov), cfg.invertY ? "Y INVERSE" : "Y NORMAL",
+        cfg.smoothCamera ? "CAMERA LISSEE" : "CAMERA DIRECTE", "INTERFACE " + std::to_string(cfg.uiSize) + "%",
+        cfg.highContrast ? "CONTRASTE FORT" : "CONTRASTE STANDARD",
+        cfg.toggleSprint ? "ALT BASCULE" : "ALT MAINTIEN", std::string("CLAVIER ") + profiles[cfg.keyboardProfile],
+        "REINITIALISER TOUCHES"
+    };
+    for (int i = 0; i < 16; ++i)
+    {
+        auto [x, y] = settingsOptionPosition(s, i);
+        std::string label = i < 8 ? labels[i] : std::string(movementLabel(i - 8)) + " " +
+                                                 SDL_GetKeyName(movementKeys(cfg, i - 8).first);
+        if (i >= 8 && binding == i - 8)
+            label = "APPUYEZ UNE TOUCHE";
+        menuButton(x, y, 158, 32, label.c_str(), pointInRect(mouseX, mouseY, x, y, 158, 32));
+    }
+    if (!bindingStatus.empty())
+        signText(s.panelX + 20, s.panelY + 436, 1.6f, bindingStatus);
     menuButton(s.backX, s.backY, s.backW, s.backH, "RETOUR", hoverBack, MenuAction::Normal);
 }
 
@@ -1164,7 +1250,7 @@ void drawClockEditBox(int winW, int winH, const std::string &freqText)
     signText(textX, textY + 90.0f, 1.5f, "Entrer pour valider, Esc pour annuler");
 }
 
-void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value)
+void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value, const std::string &simulationStatus)
 {
     float boxW = 360.0f;
     float boxH = 200.0f;
@@ -1191,7 +1277,8 @@ void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value)
     std::snprintf(buf, sizeof(buf), "Valeur binaire : %s", bin.c_str());
     signText(textX, textY + 56.0f, 2.0f, buf);
 
-    signText(textX, textY + 100.0f, 1.5f, "Appuyer sur Esc pour fermer");
+    signText(textX, textY + 90.0f, 1.7f, simulationStatus);
+    signText(textX, textY + 115.0f, 1.5f, "F6 PAUSE  F7 UN TICK  ESC FERMER");
 }
 
 void drawSplitterEditBox(int winW, int winH, bool isMerger, const std::string &widthText, bool order)
@@ -1220,13 +1307,45 @@ void drawSplitterEditBox(int winW, int winH, bool isMerger, const std::string &w
 }
 
 // ---------- Config ----------
-static const char *CONFIG_FILE = "config.cfg";
+static std::filesystem::path configFile = "config.cfg";
+
+void initializePlayerStorage()
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (fs::is_regular_file(gResourceRoot / "CMakeLists.txt", ec))
+        return;
+    char *preferred = SDL_GetPrefPath("Logicraft", "Logicraft");
+    if (!preferred)
+        return;
+    fs::path root = fs::u8path(preferred);
+    SDL_free(preferred);
+
+    fs::path maps = root / "maps";
+    if (fs::create_directories(maps, ec))
+    {
+        for (fs::directory_iterator it(gResourceRoot / "maps", ec), end; !ec && it != end; it.increment(ec))
+        {
+            std::error_code copyError;
+            if (it->path().extension() == ".bulldog" && it->is_regular_file(copyError))
+                fs::copy_file(it->path(), maps / it->path().filename(), copyError);
+        }
+    }
+    ec.clear();
+    if (fs::is_directory(maps, ec))
+        gMapsDir = maps;
+    configFile = root / "config.cfg";
+    ec.clear();
+    if (!fs::exists(configFile, ec) && !ec)
+        fs::copy_file(gResourceRoot / "config.cfg", configFile, ec);
+}
 
 void loadConfig(Config &cfg)
 {
-    std::ifstream in(CONFIG_FILE);
+    std::ifstream in(configFile);
     if (!in)
         return;
+    bool currentBindings = false;
     std::string line;
     while (std::getline(in, line))
     {
@@ -1235,7 +1354,9 @@ void loadConfig(Config &cfg)
             continue;
         std::string key = line.substr(0, pos);
         std::string val = line.substr(pos + 1);
-        if (key == "mouse_sensitivity")
+        if (key == "bindings_version")
+            currentBindings = val == "2";
+        else if (key == "mouse_sensitivity")
         {
             try
             {
@@ -1245,6 +1366,32 @@ void loadConfig(Config &cfg)
             }
             catch (...)
             {
+            }
+        }
+        else if (key == "invert_y" || key == "smooth_camera" || key == "toggle_sprint" || key == "high_contrast")
+        {
+            bool enabled = val == "1" || val == "true";
+            if (key == "invert_y") cfg.invertY = enabled;
+            if (key == "smooth_camera") cfg.smoothCamera = enabled;
+            if (key == "toggle_sprint") cfg.toggleSprint = enabled;
+            if (key == "high_contrast") cfg.highContrast = enabled;
+        }
+        else if (key == "fov" || key == "ui_size" || key == "keyboard_profile" ||
+                 (key.size() == 5 && (key.compare(0, 4, "move") == 0 || key.compare(0, 4, "bind") == 0) &&
+                  key[4] >= '0' && key[4] <= '3'))
+        {
+            char *end = nullptr;
+            long number = std::strtol(val.c_str(), &end, 10);
+            if (end != val.c_str() && !*end)
+            {
+                if (key == "fov") cfg.fov = static_cast<int>(std::clamp(number, 55L, 100L));
+                else if (key == "ui_size") cfg.uiSize = static_cast<int>(std::clamp(number, 75L, 125L));
+                else if (key == "keyboard_profile") cfg.keyboardProfile = static_cast<int>(std::clamp(number, 0L, 2L));
+                else if (number >= 'a' && number <= 'z')
+                {
+                    auto &bindings = key[0] == 'm' ? cfg.movement : cfg.actions;
+                    bindings[key[4] - '0'] = static_cast<SDL_Keycode>(number);
+                }
             }
         }
         else if (key == "fullscreen")
@@ -1260,17 +1407,40 @@ void loadConfig(Config &cfg)
             cfg.vsync = (val == "1" || val == "true" || val == "yes");
         }
     }
+    if (!currentBindings && cfg.actions[1] == SDLK_f)
+    {
+        const auto reserved = [&](SDL_Keycode key)
+        {
+            return std::find(cfg.movement.begin(), cfg.movement.end(), key) != cfg.movement.end() ||
+                   cfg.actions[0] == key || cfg.actions[2] == key || cfg.actions[3] == key;
+        };
+        if (!reserved(SDLK_q))
+            cfg.actions[1] = SDLK_UNKNOWN;
+    }
 }
 
 void saveConfig(const Config &cfg)
 {
-    std::ofstream out(CONFIG_FILE);
+    std::ofstream out(configFile);
     if (!out)
         return;
     out << "mouse_sensitivity=" << cfg.mouseSensitivity << "\n";
     out << "fullscreen=" << (cfg.fullscreenDefault ? 1 : 0) << "\n";
     out << "show_fps=" << (cfg.showFps ? 1 : 0) << "\n";
     out << "vsync=" << (cfg.vsync ? 1 : 0) << "\n";
+    out << "invert_y=" << cfg.invertY << '\n';
+    out << "smooth_camera=" << cfg.smoothCamera << '\n';
+    out << "toggle_sprint=" << cfg.toggleSprint << '\n';
+    out << "high_contrast=" << cfg.highContrast << '\n';
+    out << "fov=" << cfg.fov << '\n';
+    out << "ui_size=" << cfg.uiSize << '\n';
+    out << "bindings_version=2\n";
+    out << "keyboard_profile=" << cfg.keyboardProfile << '\n';
+    for (int i = 0; i < 4; ++i)
+    {
+        out << "move" << i << '=' << cfg.movement[i] << '\n';
+        out << "bind" << i << '=' << cfg.actions[i] << '\n';
+    }
 }
 
 // ---------- Save / Load ----------
@@ -1288,30 +1458,6 @@ std::string timestampSaveName()
     std::snprintf(buf, sizeof(buf), "%04d%02d%02d_%02d%02d%02d.bulldog", tmStruct.tm_year + 1900,
                   tmStruct.tm_mon + 1, tmStruct.tm_mday, tmStruct.tm_hour, tmStruct.tm_min, tmStruct.tm_sec);
     return (gMapsDir / buf).string();
-}
-
-std::string latestSaveInMaps()
-{
-    namespace fs = std::filesystem;
-    fs::path dir = gMapsDir;
-    if (!fs::exists(dir))
-        return {};
-    fs::file_time_type latestTime;
-    fs::path latestPath;
-    for (auto &p : fs::directory_iterator(dir))
-    {
-        if (!p.is_regular_file())
-            continue;
-        if (p.path().extension() != ".bulldog")
-            continue;
-        auto t = p.last_write_time();
-        if (latestPath.empty() || t > latestTime)
-        {
-            latestTime = t;
-            latestPath = p.path();
-        }
-    }
-    return latestPath.empty() ? std::string{} : latestPath.string();
 }
 
 std::vector<std::string> gSaveList;
@@ -1348,24 +1494,39 @@ void refreshSaveList()
 {
     saveOffset = 0;
     gSaveList.clear();
+    saveDates.clear();
     gSaveIndex = -1;
     namespace fs = std::filesystem;
-    fs::path dir = gMapsDir;
-    if (!fs::exists(dir))
-        return;
+    std::error_code ec;
     std::vector<std::pair<fs::file_time_type, std::string>> entries;
-    for (auto &p : fs::directory_iterator(dir))
+    for (fs::directory_iterator it(gMapsDir, ec), end; !ec && it != end; it.increment(ec))
     {
-        if (!p.is_regular_file())
+        std::error_code entryError;
+        if (it->path().extension() != ".bulldog" || !it->is_regular_file(entryError))
             continue;
-        if (p.path().extension() != ".bulldog")
-            continue;
-        entries.push_back({p.last_write_time(), p.path().string()});
+        auto modified = it->last_write_time(entryError);
+        if (!entryError)
+            entries.emplace_back(modified, it->path().string());
     }
     std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b)
-              { return a.first > b.first; });
-    for (auto &e : entries)
-        gSaveList.push_back(e.second);
+              { return a.first == b.first ? a.second < b.second : a.first > b.first; });
+    const auto fileNow = fs::file_time_type::clock::now();
+    const auto systemNow = std::chrono::system_clock::now();
+    for (const auto &[modified, path] : entries)
+    {
+        gSaveList.push_back(path);
+        auto systemTime = std::chrono::time_point_cast<std::chrono::system_clock::duration>(modified - fileNow + systemNow);
+        auto time = std::chrono::system_clock::to_time_t(systemTime);
+        std::tm local{};
+#ifdef _WIN32
+        localtime_s(&local, &time);
+#else
+        localtime_r(&time, &local);
+#endif
+        char date[16];
+        std::strftime(date, sizeof(date), "%d/%m/%y", &local);
+        saveDates.emplace_back(date);
+    }
     if (!gSaveList.empty())
         gSaveIndex = 0;
 }
@@ -1395,17 +1556,6 @@ std::string normalizeSaveInput(const std::string &input)
     return out;
 }
 
-int findSaveIndexByStem(const std::string &stem)
-{
-    std::string target = normalizeSaveInput(stem);
-    for (int i = 0; i < static_cast<int>(gSaveList.size()); ++i)
-    {
-        if (normalizeSaveInput(stemFromPath(gSaveList[i])) == target)
-            return i;
-    }
-    return -1;
-}
-
 std::string buildSavePathFromInput(const std::string &input)
 {
     std::string name = normalizeSaveInput(input);
@@ -1415,6 +1565,151 @@ std::string buildSavePathFromInput(const std::string &input)
     if (name.size() < ext.size() || name.substr(name.size() - ext.size()) != ext)
         name += ext;
     return (gMapsDir / name).string();
+}
+
+enum class ConfirmationChoice { Cancel, Proceed, Save };
+
+struct MapConfirmation
+{
+    std::string title, detail, error;
+    bool offerSave;
+    std::function<void()> proceed;
+    bool relativeMouse, cursorVisible, textInput;
+    int selected = 0;
+};
+
+struct ConfirmationLayout
+{
+    float x, y, width;
+    static constexpr float height = 180.0f;
+    static constexpr float margin = 18.0f;
+    static constexpr float gap = 10.0f;
+    static constexpr float buttonHeight = 36.0f;
+    int count;
+
+    ConfirmationLayout(int winW, int winH, bool offerSave)
+        : x(std::max(16.0f, (winW - 580.0f) * 0.5f)), y((winH - height) * 0.5f),
+          width(winW - 2 * x), count(offerSave ? 3 : 2) {}
+
+    float buttonWidth() const { return (width - 2 * margin - (count - 1) * gap) / count; }
+    float buttonX(int i) const { return x + margin + i * (buttonWidth() + gap); }
+    float buttonY() const { return y + height - margin - buttonHeight; }
+
+    int hit(int mouseX, int mouseY) const
+    {
+        for (int i = 0; i < count; ++i)
+            if (pointInRect(mouseX, mouseY, buttonX(i), buttonY(), buttonWidth(), buttonHeight))
+                return i;
+        return -1;
+    }
+};
+
+void drawMapConfirmation(int winW, int winH, const MapConfirmation &confirmation, int mouseX, int mouseY)
+{
+    ConfirmationLayout panel(winW, winH, confirmation.offerSave);
+    drawQuad(0, 0, winW, winH, 0, 0, 0, 0.72f);
+    menuPanel(panel.x, panel.y, panel.width, panel.height, confirmation.title.c_str());
+    signText(panel.x + panel.margin, panel.y + 59, 2, confirmation.detail);
+    if (!confirmation.error.empty())
+        signText(panel.x + panel.margin, panel.y + 90, 2, confirmation.error);
+    int hover = panel.hit(mouseX, mouseY);
+    for (int i = 0; i < panel.count; ++i)
+    {
+        const char *label = i == 0 ? "ANNULER" : i == 2 ? "ENREGISTRER" :
+                            confirmation.offerSave ? "SANS ENREGISTRER" : "ECRASER";
+        menuButton(panel.buttonX(i), panel.buttonY(), panel.buttonWidth(), panel.buttonHeight, label,
+                   i == hover || i == confirmation.selected,
+                   i == 2 ? MenuAction::Primary : i == 1 ? MenuAction::Caution : MenuAction::Normal, 2.0f);
+    }
+}
+
+#ifdef _WIN32
+std::filesystem::path chooseMapFile(SDL_Window *window, bool exportFile)
+{
+    SDL_SysWMinfo info{};
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info))
+        return {};
+    wchar_t path[32768] = {};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = info.info.win.window;
+    dialog.lpstrFilter = L"Cartes Logicraft (*.bulldog)\0*.bulldog\0";
+    dialog.lpstrFile = path;
+    dialog.nMaxFile = static_cast<DWORD>(std::size(path));
+    dialog.lpstrDefExt = L"bulldog";
+    dialog.Flags = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST |
+                   (exportFile ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    if (exportFile ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog))
+        return path;
+    return {};
+}
+#endif
+
+bool saveHotbar(const std::string &path, const std::vector<ItemStack> &slots, int selected,
+                const std::set<BlockType> &favorites)
+{
+    namespace fs = std::filesystem;
+    const fs::path target = path + ".hotbar";
+    fs::path temporary = path + ".hotbar.saving";
+    std::error_code ec;
+    if (!fs::create_directory(temporary, ec))
+        return false;
+    const fs::path candidate = temporary / "hotbar";
+    std::ofstream output(candidate);
+    output << "LOGICRAFT-HOTBAR-1 " << selected << '\n';
+    for (const ItemStack &slot : slots)
+        output << static_cast<int>(slot.type) << ' ' << slot.count << '\n';
+    for (BlockType type : favorites)
+        output << static_cast<int>(type) << ' ';
+    output << '\n';
+    output.close();
+    if (output)
+        fs::rename(candidate, target, ec);
+    bool ok = output && !ec;
+    fs::remove(candidate, ec);
+    fs::remove(temporary, ec);
+    return ok;
+}
+
+void loadHotbar(const std::string &path, std::vector<ItemStack> &slots, int &selected,
+                std::set<BlockType> &favorites)
+{
+    std::ifstream input(path + ".hotbar");
+    std::string version;
+    int index = 0;
+    std::vector<ItemStack> loaded(slots.size());
+    bool valid = (input >> version >> index) && version == "LOGICRAFT-HOTBAR-1" &&
+                 index >= 0 && index < static_cast<int>(slots.size());
+    for (ItemStack &slot : loaded)
+    {
+        int type, count;
+        if (!(input >> type >> count) || !BLOCKS.count(static_cast<BlockType>(type)) ||
+            count < 0 || count > maxStackSize || ((count == 0) != (type == static_cast<int>(BlockType::Air))))
+        {
+            valid = false;
+            break;
+        }
+        slot = {static_cast<BlockType>(type), count};
+    }
+    favorites.clear();
+    if (valid)
+    {
+        int id;
+        while (input >> id)
+        {
+            BlockType type = static_cast<BlockType>(id);
+            if (type != BlockType::Air && BLOCKS.count(type))
+                favorites.insert(type);
+        }
+        std::copy(loaded.begin(), loaded.end(), slots.begin());
+        selected = index;
+    }
+    else
+    {
+        std::fill(slots.begin(), slots.end(), ItemStack{});
+        selected = 0;
+    }
 }
 
 void drawButtonStateLabels(const World &world, const Player &player, float radius)
@@ -1901,7 +2196,7 @@ void drawSlotBox(float x, float y, float slotSize, const ItemStack &slot, bool s
     drawOutline(x - 4.0f, y - 4.0f, slotSize + 8.0f, slotSize + 8.0f, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
     drawQuad(x, y, slotSize, slotSize, col[0], col[1], col[2], alpha);
     drawQuad(x, y, slotSize, slotSize * 0.5f, 1.0f, 1.0f, 1.0f, 0.06f);
-    drawOutline(x, y, slotSize, slotSize, 0.0f, 0.0f, 0.0f, 0.5f, 2.0f);
+    drawOutline(x, y, slotSize, slotSize, 0.0f, 0.0f, 0.0f, gConfig.highContrast ? 1.0f : 0.5f, 2.0f);
     drawSlotIcon(slot, x, y, slotSize);
     if (slot.count > 0)
         drawNumber(x + slotSize - 4.0f, y + slotSize - 16.0f, slot.count, 10.0f, 0.0f, 0.0f, 0.0f, 1.0f);
@@ -1911,6 +2206,13 @@ void drawSlotBox(float x, float y, float slotSize, const ItemStack &slot, bool s
         drawOutline(x - 6.0f, y - 6.0f, slotSize + 12.0f, slotSize + 12.0f, 1.0f, 1.0f, 1.0f, 0.35f, 2.0f);
 }
 
+void hudText(float x, float y, float size, const std::string &text)
+{
+    float width = static_cast<float>(text.size()) * size * 4.8f;
+    drawQuad(x - 4, y - 4, width + 8, size * 5 + 8, 0.02f, 0.02f, 0.03f, gConfig.highContrast ? 0.96f : 0.73f);
+    drawTextTiny(x, y, size, text, 1.0f, 0.97f, 0.88f, 1.0f);
+}
+
 struct SlotHit
 {
     bool valid = false;
@@ -1918,100 +2220,91 @@ struct SlotHit
     int idx = -1;
 };
 
-constexpr float inventoryBarGap = 24.0f;
+struct InventoryLayout
+{
+    float size, gap, padding, invWidth, invHeight, invX, invY, hbWidth, hbX, hbY;
+
+    InventoryLayout(int width, int height)
+    {
+        const float scale = std::min({1.0f, width / 650.0f, height / 420.0f});
+        size = 54 * scale;
+        gap = 10 * scale;
+        padding = 16 * scale;
+        invWidth = 2 * padding + INV_COLS * size + (INV_COLS + 1) * gap;
+        invHeight = 2 * padding + INV_ROWS * size + (INV_ROWS + 1) * gap;
+        hbWidth = 2 * padding + hotbarSize * size + (hotbarSize + 1) * gap;
+        invX = (width - invWidth) * 0.5f;
+        hbX = (width - hbWidth) * 0.5f;
+        invY = (height - invHeight - size - 2 * padding - 24 * scale) * 0.5f + 10 * scale;
+        hbY = invY + invHeight + 24 * scale;
+    }
+
+    std::pair<float, float> position(bool hotbar, int idx) const
+    {
+        int col = hotbar ? idx : idx % INV_COLS;
+        int row = hotbar ? 0 : idx / INV_COLS;
+        float x = (hotbar ? hbX : invX) + padding + gap + col * (size + gap);
+        float y = (hotbar ? hbY : invY + gap) + padding + row * (size + gap);
+        return {x, y};
+    }
+};
 
 SlotHit hitTestInventoryUI(int mx, int my, int winW, int winH)
 {
-    const float slotSize = 54.0f;
-    const float gap = 10.0f;
-    const float padding = 16.0f;
-
-    float invWidth = padding * 2 + INV_COLS * slotSize + (INV_COLS + 1) * gap;
-    float invHeight = padding * 2 + INV_ROWS * slotSize + (INV_ROWS + 1) * gap;
-    float invX = (winW - invWidth) * 0.5f;
-    float invY = (winH - invHeight) * 0.5f - 40.0f;
-
-    for (int row = 0; row < INV_ROWS; ++row)
+    InventoryLayout layout(winW, winH);
+    for (bool hotbar : {false, true})
     {
-        for (int col = 0; col < INV_COLS; ++col)
+        for (int idx = 0; idx < (hotbar ? hotbarSize : INV_COLS * INV_ROWS); ++idx)
         {
-            float x = invX + padding + gap * (col + 1) + slotSize * col;
-            float y = invY + padding + gap * (row + 1) + slotSize * row;
-            if (pointInRect(static_cast<float>(mx), static_cast<float>(my), x, y, slotSize, slotSize))
-                return {true, false, row * INV_COLS + col};
+            auto [x, y] = layout.position(hotbar, idx);
+            if (pointInRect(mx, my, x, y, layout.size, layout.size))
+                return {true, hotbar, idx};
         }
-    }
-
-    float hbWidth = padding * 2 + static_cast<float>(HOTBAR.size()) * slotSize + (HOTBAR.size() + 1) * gap;
-    float hbX = (winW - hbWidth) * 0.5f;
-    float hbY = invY + invHeight + inventoryBarGap;
-    for (int i = 0; i < static_cast<int>(HOTBAR.size()); ++i)
-    {
-        float x = hbX + padding + gap * (i + 1) + slotSize * i;
-        float y = hbY + padding;
-        if (pointInRect(static_cast<float>(mx), static_cast<float>(my), x, y, slotSize, slotSize))
-            return {true, true, i};
     }
     return {};
 }
 
 void drawInventoryPanel(int winW, int winH, const std::vector<ItemStack> &inventory, const std::vector<ItemStack> &hotbar,
-                        int pendingSlot, bool pendingIsHotbar, int mouseX, int mouseY, HoverLabel &hoverLabel)
+                        const ItemStack &held, const std::vector<ItemStack *> &dragSlots, bool dragging, bool rightDrag,
+                        int mouseX, int mouseY, HoverLabel &hoverLabel, const std::string &title,
+                        const std::string &instructions, const std::set<BlockType> *favorites)
 {
-    const float slotSize = 54.0f;
-    const float gap = 10.0f;
-    const float padding = 16.0f;
-
-    float invWidth = padding * 2 + INV_COLS * slotSize + (INV_COLS + 1) * gap;
-    float invHeight = padding * 2 + INV_ROWS * slotSize + (INV_ROWS + 1) * gap;
-    float invX = (winW - invWidth) * 0.5f;
-    float invY = (winH - invHeight) * 0.5f - 40.0f;
-
-    float hbWidth = padding * 2 + static_cast<float>(hotbar.size()) * slotSize + (hotbar.size() + 1) * gap;
-    float hbX = (winW - hbWidth) * 0.5f;
-    float hbY = invY + invHeight + inventoryBarGap;
-    float panelW = std::max(invWidth, hbWidth) + 32;
-    float panelY = invY - 30;
+    InventoryLayout layout(winW, winH);
+    float margin = 16 * layout.size / 54;
+    float panelW = std::max(layout.invWidth, layout.hbWidth) + 2 * margin;
+    float panelY = layout.invY - 30 * layout.size / 54;
     drawQuad(0, 0, winW, winH, 0,0,0,0.18f);
-    menuPanel((winW-panelW)*0.5f, panelY, panelW, hbY+slotSize+2*padding-panelY, "INVENTAIRE");
+    menuPanel((winW-panelW)*0.5f, panelY, panelW,
+              layout.hbY+layout.size+2*layout.padding-panelY, title.c_str());
+    signText(layout.hbX + layout.padding + layout.gap, layout.hbY-9, 1.6f, instructions);
 
-    for (int row = 0; row < INV_ROWS; ++row)
+    ItemStack remaining = held;
+    for (bool isHotbar : {false, true})
     {
-        for (int col = 0; col < INV_COLS; ++col)
+        const auto &slots = isHotbar ? hotbar : inventory;
+        for (int idx = 0; idx < static_cast<int>(slots.size()); ++idx)
         {
-            float x = invX + padding + gap * (col + 1) + slotSize * col;
-            float y = invY + padding + gap * (row + 1) + slotSize * row;
-            int idx = row * INV_COLS + col;
-            bool hovered = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), x, y, slotSize, slotSize);
-            bool selected = (!pendingIsHotbar && pendingSlot == idx);
-            drawSlotBox(x, y, slotSize, inventory[idx], selected, hovered);
-            if (hovered && inventory[idx].count > 0 && BLOCKS.count(inventory[idx].type))
+            auto [x, y] = layout.position(isHotbar, idx);
+            bool hovered = pointInRect(mouseX, mouseY, x, y, layout.size, layout.size);
+            bool preview = dragging &&
+                           std::find(dragSlots.begin(), dragSlots.end(), &slots[idx]) != dragSlots.end();
+            ItemStack shown = slots[idx];
+            if (preview)
             {
-                hoverLabel.valid = true;
-                hoverLabel.text = BLOCKS.at(inventory[idx].type).name;
-                hoverLabel.x = static_cast<float>(mouseX);
-                hoverLabel.y = static_cast<float>(mouseY);
+                int each = rightDrag ? 1 : held.count / static_cast<int>(dragSlots.size());
+                if (rightDrag)
+                    each = std::find(dragSlots.begin(), dragSlots.end(), &slots[idx]) - dragSlots.begin() < held.count;
+                moveItems(remaining, shown, each);
             }
+            drawSlotBox(x, y, layout.size, shown, preview, hovered);
+            if (!isHotbar && shown.count && favorites && favorites->count(shown.type))
+                signText(x + 3, y + 3, 1.5f, "*");
+            if (hovered && shown.count && !held.count)
+                hoverLabel = {true, BLOCKS.at(shown.type).name, static_cast<float>(mouseX), static_cast<float>(mouseY)};
         }
     }
-
-    signText(hbX + padding + gap, hbY-9, 2, "RACCOURCIS");
-
-    for (int i = 0; i < static_cast<int>(HOTBAR.size()); ++i)
-    {
-        float x = hbX + padding + gap * (i + 1) + slotSize * i;
-        float y = hbY + padding;
-        bool hovered = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), x, y, slotSize, slotSize);
-        bool selected = (pendingIsHotbar && pendingSlot == i);
-        drawSlotBox(x, y, slotSize, hotbar[i], selected, hovered);
-        if (hovered && hotbar[i].count > 0 && BLOCKS.count(hotbar[i].type))
-        {
-            hoverLabel.valid = true;
-            hoverLabel.text = BLOCKS.at(hotbar[i].type).name;
-            hoverLabel.x = static_cast<float>(mouseX);
-            hoverLabel.y = static_cast<float>(mouseY);
-        }
-    }
+    if (remaining.count)
+        drawSlotBox(mouseX + 8.0f, mouseY + 8.0f, layout.size * 0.75f, remaining, false, false);
 }
 
 void setup3D(SDL_Window *window, int w, int h)
@@ -2021,44 +2314,9 @@ void setup3D(SDL_Window *window, int w, int h)
     glViewport(0, 0, pixelWidth, pixelHeight);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(70.0, static_cast<double>(w) / static_cast<double>(h), 0.1, 500.0);
+    gluPerspective(gConfig.fov, static_cast<double>(w) / std::max(1, h), 0.1, 500.0);
     glMatrixMode(GL_MODELVIEW);
     glEnable(GL_DEPTH_TEST);
-}
-
-int addToSlots(std::vector<ItemStack> &slots, BlockType b, int amount)
-{
-    for (auto &s : slots)
-    {
-        if (s.count > 0 && s.type == b && s.count < MAX_STACK)
-        {
-            int add = std::min(amount, MAX_STACK - s.count);
-            s.count += add;
-            amount -= add;
-            if (amount <= 0)
-                return 0;
-        }
-    }
-    for (auto &s : slots)
-    {
-        if (s.count == 0)
-        {
-            s.type = b;
-            int add = std::min(amount, MAX_STACK);
-            s.count = add;
-            amount -= add;
-            if (amount <= 0)
-                return 0;
-        }
-    }
-    return amount;
-}
-
-int addToInventory(BlockType b, int amount, std::vector<ItemStack> &hotbarSlots, std::vector<ItemStack> &inventorySlots)
-{
-    amount = addToSlots(hotbarSlots, b, amount);
-    amount = addToSlots(inventorySlots, b, amount);
-    return amount;
 }
 
 void updateTitle(SDL_Window *window)
@@ -2075,8 +2333,9 @@ int main(int argc, char **argv)
     const float PLAYER_HEIGHT = 1.7f;
     const float EYE_HEIGHT = PLAYER_HEIGHT * 0.8f;
     const float SPEED = 32.0f;
-    const float JUMP = 20.0f;
-    const float GRAVITY = -48.0f;
+    const float JUMP = 12.8f;
+    const float RISING_GRAVITY = -48.0f;
+    const float FALLING_GRAVITY = -54.0f;
     const float SPRINT_MULT = 1.6f;
     const float FLY_SPRINT_MULT = 2.4f;
     const float FLY_VERTICAL_MULT = 0.2f;
@@ -2089,8 +2348,6 @@ int main(int argc, char **argv)
         std::filesystem::current_path(gResourceRoot, ec);
     }
 
-    loadConfig(gConfig);
-
 #if defined(_WIN32) && defined(SDL_HINT_WINDOWS_DPI_SCALING)
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1");
@@ -2100,6 +2357,9 @@ int main(int argc, char **argv)
         std::cerr << "SDL init error: " << SDL_GetError() << "\n";
         return 1;
     }
+
+    initializePlayerStorage();
+    loadConfig(gConfig);
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
@@ -2113,6 +2373,7 @@ int main(int argc, char **argv)
         SDL_Quit();
         return 1;
     }
+    SDL_SetWindowMinimumSize(window, 640, 520);
     if (gConfig.fullscreenDefault)
         SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
     SDL_GLContext ctx = SDL_GL_CreateContext(window);
@@ -2209,7 +2470,7 @@ int main(int argc, char **argv)
     npc3.y = world.surfaceY(static_cast<int>(npc3.x), static_cast<int>(npc3.z));
 
     int selected = 0;
-    std::vector<ItemStack> hotbarSlots(HOTBAR.size());
+    std::vector<ItemStack> hotbarSlots(hotbarSize);
     // start with empty hotbar
     for (auto &s : hotbarSlots)
         s = {};
@@ -2225,12 +2486,81 @@ int main(int argc, char **argv)
             ++idx;
         }
     }
+    std::vector<ItemStack> paletteSlots(inventorySlots.size());
+    std::set<BlockType> favorites;
+    bool paletteOpen = false;
+    int paletteCategory = 0;
+    std::string paletteSearch;
+    auto refreshPalette = [&]
+    {
+        std::fill(paletteSlots.begin(), paletteSlots.end(), ItemStack{});
+        int index = 0;
+        for (BlockType type : INVENTORY_ALLOWED)
+        {
+            bool material = type <= BlockType::Glass;
+            if ((paletteCategory == 1 && !material) || (paletteCategory == 2 && material) ||
+                (paletteCategory == 3 && !favorites.count(type)))
+                continue;
+            std::string name = BLOCKS.at(type).name;
+            for (char &c : name)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (name.find(paletteSearch) != std::string::npos && index < static_cast<int>(paletteSlots.size()))
+                paletteSlots[index++] = {type, maxStackSize};
+        }
+    };
+    refreshPalette();
     bool inventoryOpen = false;
     bool pauseMenuOpen = false;
     bool saveMenuOpen = false;
-    int pendingSlot = -1;
-    bool pendingIsHotbar = false;
+    ItemStack held;
+    bool mapEdited = false;
+    std::vector<ItemStack *> dragSlots;
+    SlotHit pressSlot;
+    Uint8 inventoryButton = 0;
+    bool dragging = false;
+    bool inventoryFull = false;
+    ItemStack *lastShiftSlot = nullptr;
+    BlockType lastShiftType = BlockType::Air;
     int mouseX = 0, mouseY = 0;
+
+    auto slotAt = [&](SlotHit hit) -> ItemStack *
+    {
+        return hit.valid && (hit.isHotbar || !paletteOpen) ?
+               &(hit.isHotbar ? hotbarSlots : inventorySlots)[hit.idx] : nullptr;
+    };
+    auto visitDragSlot = [&](SlotHit hit)
+    {
+        ItemStack *slot = slotAt(hit);
+        if (slot && held.count && slot->count < maxStackSize &&
+            (!slot->count || slot->type == held.type) &&
+            std::find(dragSlots.begin(), dragSlots.end(), slot) == dragSlots.end())
+        {
+            dragSlots.push_back(slot);
+            if (slot != slotAt(pressSlot))
+                dragging = true;
+        }
+    };
+    auto cancelInventoryGesture = [&]
+    {
+        inventoryButton = 0;
+        dragging = false;
+        dragSlots.clear();
+    };
+    auto closeInventory = [&]
+    {
+        cancelInventoryGesture();
+        storeItems(held, inventorySlots);
+        const int left = held.count;
+        storeItems(held, hotbarSlots);
+        mapEdited |= left != held.count;
+        inventoryFull = held.count != 0;
+        if (inventoryFull)
+            return;
+        inventoryOpen = paletteOpen = false;
+        SDL_StopTextInput();
+        SDL_SetRelativeMouseMode(SDL_TRUE);
+        SDL_ShowCursor(SDL_FALSE);
+    };
 
     bool running = true;
     Uint64 prev = SDL_GetPerformanceCounter();
@@ -2241,16 +2571,575 @@ int main(int argc, char **argv)
     float lastForwardTap = -1.0f;
     float lastSpaceTap = -1.0f;
     bool sprinting = false;
+    bool sprintToggled = false;
+    int binding = -1;
+    std::string bindingStatus;
     bool flying = false;
+    float jumpUntil = -1.0f;
+    float groundedUntil = -1.0f;
+    bool simulationPaused = false;
+    bool stepSimulation = false;
+    int simulationRate = 20;
+    float tickBudget = 0.0f;
+
+    std::optional<MapConfirmation> confirmation;
+    auto canSimulate = [&]
+    {
+        return (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) &&
+               !confirmation && !inventoryOpen && !pauseMenuOpen && !gMainMenuOpen && !gSettingsMenuOpen &&
+               !gSignEditOpen;
+    };
+    auto canPlay = [&]
+    {
+        return canSimulate() && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen;
+    };
+    auto simulationStatus = [&]
+    {
+        std::string speed = simulationPaused ? "PAUSE" : std::to_string(simulationRate) + " TICKS/S";
+        return "SIM. " + speed + "   TICK " + std::to_string(world.tick());
+    };
+    auto resetPosition = [&]
+    {
+        player.x = WIDTH * 0.5f + 0.5f;
+        player.z = DEPTH * 0.5f + 0.5f;
+        player.y = world.surfaceY(static_cast<int>(player.x), static_cast<int>(player.z)) + 0.001f;
+        player.vx = player.vy = player.vz = 0.0f;
+        flying = false;
+        jumpUntil = groundedUntil = -1.0f;
+    };
+    EditHistory history;
+    std::optional<BlockState> copiedSettings;
+    std::optional<BlockPosition> cornerA, cornerB;
+    std::vector<std::pair<BlockPosition, BlockState>> clipboard;
+    bool pastePreview = false;
+    uint8_t placementTurns = 0;
+    std::optional<BlockPosition> probe;
+    std::optional<BlockPosition> brokenBlock;
+    float breakEffectUntil = -1.0f;
+    int tutorial = 0;
+    std::optional<BlockPosition> poweredTutorialLed;
+    std::deque<std::pair<uint8_t, uint8_t>> samples;
+    std::string activeMap;
+    float saveNoticeUntil = -1.0f;
+    float nextAutosave = 120.0f;
+    int autosaveSlot = 0;
+    auto saveMap = [&](const std::string &path)
+    {
+        if (!saveWorldToFile(world, path, seed))
+        {
+            saveStatus = "ECHEC DE LA SAUVEGARDE";
+            saveNoticeUntil = elapsedTime + 4.0f;
+            return false;
+        }
+        activeMap = path;
+        bool savedBar = saveHotbar(path, hotbarSlots, selected, favorites);
+        mapEdited = !savedBar;
+        auto timestamp = stemFromPath(timestampSaveName());
+        std::string hour = timestamp.substr(9, 2) + ":" + timestamp.substr(11, 2);
+        if (tutorial == 6)
+            tutorial = 7;
+        saveStatus = savedBar ? "CARTE ENREGISTREE A " + hour : "CARTE SAUVEE - ECHEC BARRE RAPIDE";
+        saveNoticeUntil = elapsedTime + 4.0f;
+        refreshSaveList();
+        auto found = std::find(gSaveList.begin(), gSaveList.end(), path);
+        if (found != gSaveList.end())
+        {
+            gSaveIndex = static_cast<int>(found - gSaveList.begin());
+            saveOffset = std::max(0, gSaveIndex - saveRows + 1);
+        }
+        return savedBar;
+    };
+    auto saveAs = [&]
+    {
+        std::string path = buildSavePathFromInput(gSaveNameInput);
+        std::error_code ec;
+        if (std::filesystem::exists(path, ec) || ec)
+        {
+            saveStatus = ec ? "NOM INACCESSIBLE" : "CE NOM EXISTE DEJA";
+            saveNoticeUntil = elapsedTime + 4.0f;
+            return false;
+        }
+        return saveMap(path);
+    };
+    auto saveCurrent = [&]
+    {
+        return activeMap.empty() ? saveMap(timestampSaveName()) : saveMap(activeMap);
+    };
+    auto requestConfirmation = [&](std::string title, std::string detail, bool offerSave, std::function<void()> proceed)
+    {
+        if (offerSave && !mapEdited)
+        {
+            proceed();
+            return;
+        }
+        confirmation = MapConfirmation{std::move(title), std::move(detail), {}, offerSave, std::move(proceed),
+                                       SDL_GetRelativeMouseMode() == SDL_TRUE, SDL_ShowCursor(SDL_QUERY) == SDL_ENABLE,
+                                       SDL_IsTextInputActive() == SDL_TRUE};
+        SDL_StopTextInput();
+        SDL_SetRelativeMouseMode(SDL_FALSE);
+        SDL_ShowCursor(SDL_TRUE);
+    };
+    auto resolveConfirmation = [&](ConfirmationChoice choice)
+    {
+        if (choice == ConfirmationChoice::Save && !saveCurrent())
+        {
+            confirmation->error = saveStatus;
+            return;
+        }
+        MapConfirmation closed = std::move(*confirmation);
+        confirmation.reset();
+        SDL_SetRelativeMouseMode(closed.relativeMouse ? SDL_TRUE : SDL_FALSE);
+        SDL_ShowCursor(closed.cursorVisible ? SDL_TRUE : SDL_FALSE);
+        if (closed.textInput)
+            SDL_StartTextInput();
+        if (choice != ConfirmationChoice::Cancel)
+            closed.proceed();
+    };
+    auto requestQuit = [&]
+    {
+        requestConfirmation("QUITTER LOGICRAFT ?", "LA CARTE CONTIENT DES MODIFICATIONS.", true,
+                            [&] { running = false; });
+    };
+    auto openMap = [&](const std::string &path)
+    {
+        uint32_t newSeed = seed;
+        if (!loadWorldFromFile(world, path, newSeed))
+        {
+            saveStatus = "ECHEC DU CHARGEMENT";
+            return false;
+        }
+        seed = newSeed;
+        activeMap = stemFromPath(path).rfind("RECUPERATION-", 0) == 0 ? std::string{} : path;
+        mapEdited = activeMap.empty();
+        loadHotbar(path, hotbarSlots, selected, favorites);
+        refreshPalette();
+        resetPosition();
+        tickBudget = 0;
+        nextAutosave = elapsedTime + 120.0f;
+        markAllChunksDirty();
+        history = {};
+        tutorial = 0;
+        brokenBlock.reset();
+        copiedSettings.reset();
+        cornerA.reset();
+        cornerB.reset();
+        pastePreview = false;
+        probe.reset();
+        samples.clear();
+        saveStatus = "CARTE CHARGEE";
+        return true;
+    };
+    auto newMap = [&]
+    {
+        seed = static_cast<unsigned>(std::chrono::system_clock::now().time_since_epoch().count());
+        world.generate(seed);
+        world.setTick(0);
+        activeMap.clear();
+        mapEdited = false;
+        std::fill(hotbarSlots.begin(), hotbarSlots.end(), ItemStack{});
+        selected = 0;
+        favorites.clear();
+        refreshPalette();
+        resetPosition();
+        markAllChunksDirty();
+        history = {};
+        tutorial = 0;
+        brokenBlock.reset();
+        copiedSettings.reset();
+        cornerA.reset();
+        cornerB.reset();
+        probe.reset();
+        samples.clear();
+        pastePreview = false;
+        tickBudget = 0;
+        nextAutosave = elapsedTime + 120.0f;
+        saveStatus = "NOUVELLE CARTE";
+    };
+    auto duplicateOrRename = [&](bool rename)
+    {
+        if (gSaveIndex < 0 || gSaveIndex >= static_cast<int>(gSaveList.size()) || gSaveNameInput.empty())
+        {
+            saveStatus = "CHOISISSEZ UNE CARTE ET UN NOUVEAU NOM";
+            return;
+        }
+        const std::string source = gSaveList[gSaveIndex];
+        const std::string destination = buildSavePathFromInput(gSaveNameInput);
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        if (fs::exists(destination, ec) || ec)
+        {
+            saveStatus = "NOM DEJA UTILISE OU INACCESSIBLE";
+            return;
+        }
+        if (rename)
+            fs::rename(source, destination, ec);
+        else
+            fs::copy_file(source, destination, ec);
+        if (ec)
+        {
+            saveStatus = "OPERATION IMPOSSIBLE";
+            return;
+        }
+        if (activeMap == source && rename)
+            activeMap = destination;
+        if (fs::exists(source + ".hotbar", ec) && !ec)
+        {
+            if (rename)
+                fs::rename(source + ".hotbar", destination + ".hotbar", ec);
+            else
+                fs::copy_file(source + ".hotbar", destination + ".hotbar", ec);
+        }
+        saveStatus = ec ? "CARTE TRAITEE - ECHEC BARRE RAPIDE" : rename ? "CARTE RENOMMEE" : "CARTE DUPLIQUEE";
+        refreshSaveList();
+    };
+    auto resumePlay = [&]
+    {
+        gMainMenuOpen = gSettingsMenuOpen = pauseMenuOpen = saveMenuOpen = false;
+        gSaveInputFocus = false;
+        SDL_StopTextInput();
+        SDL_SetRelativeMouseMode(SDL_TRUE);
+        SDL_ShowCursor(SDL_FALSE);
+        smoothDX = smoothDY = 0.0f;
+    };
+    auto requestOpenMap = [&](std::string path)
+    {
+        const std::string detail = "CARTE A OUVRIR : " + stemFromPath(path).substr(0, 36);
+        requestConfirmation("ENREGISTRER AVANT DE CHARGER ?", detail, true, [&, path = std::move(path)]
+        {
+            if (openMap(path))
+                resumePlay();
+        });
+    };
+    auto requestNewMap = [&](bool startTutorial)
+    {
+        requestConfirmation(startTutorial ? "OUVRIR LE TUTORIEL ?" : "CREER UNE NOUVELLE CARTE ?",
+                            "LA CARTE CONTIENT DES MODIFICATIONS.", true, [&, startTutorial]
+        {
+            newMap();
+            if (startTutorial)
+            {
+                tutorial = 1;
+                hotbarSlots[0] = {BlockType::Button, maxStackSize};
+                hotbarSlots[1] = {BlockType::Wire, maxStackSize};
+                hotbarSlots[2] = {BlockType::Led, maxStackSize};
+                hotbarSlots[3] = {BlockType::NotGate, maxStackSize};
+            }
+            resumePlay();
+        });
+    };
+    auto targetBlock = [&]
+    {
+        Vec3 fwd = forwardVec(player.yaw, player.pitch);
+        return raycast(world, player.x, player.y + EYE_HEIGHT, player.z, fwd.x, fwd.y, fwd.z, 8.0f);
+    };
+    auto canPlace = [&](const HitInfo &hit)
+    {
+        int x = hit.x + hit.nx, y = hit.y + hit.ny, z = hit.z + hit.nz;
+        return hit.hit && hotbarSlots[selected].count && world.inside(x, y, z) &&
+               (world.get(x, y, z) == BlockType::Air || world.get(x, y, z) == BlockType::Water) &&
+               !blockIntersectsPlayer(player, x, y, z, PLAYER_HEIGHT);
+    };
+    auto editCell = [&](BlockPosition position, auto change)
+    {
+        const auto [x, y, z] = position;
+        BlockState before = BlockState::read(world, position);
+        change();
+        history.record({{position, std::move(before), BlockState::read(world, position)}});
+        mapEdited = true;
+        markNeighborsDirty(x, y, z);
+    };
+    auto copySelection = [&]
+    {
+        if (!cornerA || !cornerB)
+            return;
+        BlockPosition min{}, max{};
+        int volume = 1;
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            min[axis] = std::min((*cornerA)[axis], (*cornerB)[axis]);
+            max[axis] = std::max((*cornerA)[axis], (*cornerB)[axis]);
+            volume *= max[axis] - min[axis] + 1;
+        }
+        if (volume > 4096)
+            return;
+        clipboard.clear();
+        for (int y = min[1]; y <= max[1]; ++y)
+            for (int z = min[2]; z <= max[2]; ++z)
+                for (int x = min[0]; x <= max[0]; ++x)
+                {
+                    auto state = BlockState::read(world, {x, y, z});
+                    if (state.type != BlockType::Air)
+                        clipboard.emplace_back(BlockPosition{x - min[0], y - min[1], z - min[2]}, std::move(state));
+                }
+        cornerA.reset();
+        cornerB.reset();
+    };
+    auto rotateClipboard = [&]
+    {
+        int minX = 0;
+        for (auto &[offset, state] : clipboard)
+        {
+            auto [x, z] = rotateHorizontal(offset[0], offset[2], 1);
+            offset[0] = x;
+            offset[2] = z;
+            minX = std::min(minX, x);
+            if (isDirectional(state.type))
+                state.orientation = (state.orientation + 1) & 3;
+        }
+        for (auto &entry : clipboard)
+            entry.first[0] -= minX;
+    };
+    auto validPaste = [&](const HitInfo &hit)
+    {
+        return hit.hit && std::all_of(clipboard.begin(), clipboard.end(), [&](const auto &entry)
+        {
+            const auto [dx, dy, dz] = entry.first;
+            int x = hit.x + hit.nx + dx, y = hit.y + hit.ny + dy, z = hit.z + hit.nz + dz;
+            return world.inside(x, y, z) && world.get(x, y, z) == BlockType::Air &&
+                   !blockIntersectsPlayer(player, x, y, z, PLAYER_HEIGHT);
+        });
+    };
+    auto pasteBlocks = [&]
+    {
+        HitInfo hit = targetBlock();
+        if (!validPaste(hit))
+            return;
+        std::vector<BlockEdit> changes;
+        changes.reserve(clipboard.size());
+        for (const auto &[offset, state] : clipboard)
+        {
+            BlockPosition position = {hit.x + hit.nx + offset[0], hit.y + hit.ny + offset[1], hit.z + hit.nz + offset[2]};
+            BlockState before = BlockState::read(world, position);
+            state.write(world, position, false);
+            changes.push_back({position, std::move(before), BlockState::read(world, position)});
+            markNeighborsDirty(position[0], position[1], position[2]);
+        }
+        history.record(std::move(changes));
+        mapEdited = true;
+        pastePreview = false;
+    };
+    auto exchangeTemplate = [&](bool exporting)
+    {
+        std::filesystem::path file = gMapsDir.parent_path() / "circuits" / "modele.bulldog";
+#ifdef _WIN32
+        file = chooseMapFile(window, exporting);
+        if (file.empty())
+            return;
+#endif
+        World model(WIDTH, HEIGHT, DEPTH);
+        if (exporting)
+        {
+            if (clipboard.empty())
+                return;
+            for (const auto &[offset, state] : clipboard)
+                state.write(model, offset, false);
+            saveStatus = saveWorldToFile(model, file, 0) ? "CIRCUIT ENREGISTRE" : "ECHEC ECRITURE CIRCUIT";
+        }
+        else
+        {
+            uint32_t modelSeed;
+            if (!loadWorldFromFile(model, file, modelSeed))
+                saveStatus = "ECHEC LECTURE CIRCUIT";
+            else
+            {
+                std::vector<std::pair<BlockPosition, BlockState>> loaded;
+                for (int y = 0; y < HEIGHT && loaded.size() <= 4096; ++y)
+                    for (int z = 0; z < DEPTH && loaded.size() <= 4096; ++z)
+                        for (int x = 0; x < WIDTH && loaded.size() <= 4096; ++x)
+                            if (model.get(x, y, z) != BlockType::Air)
+                                loaded.emplace_back(BlockPosition{x, y, z}, BlockState::read(model, {x, y, z}));
+                if (loaded.empty() || loaded.size() > 4096)
+                    saveStatus = "MODELE VIDE OU LIMITE DE 4096 BLOCS";
+                else
+                {
+                    clipboard = std::move(loaded);
+                    pastePreview = true;
+                    saveStatus = "CIRCUIT CHARGE";
+                }
+            }
+        }
+        saveNoticeUntil = elapsedTime + 4.0f;
+    };
+    auto editBlock = [&](Uint8 button, bool firstPress, bool forcePlace)
+    {
+        HitInfo hit = targetBlock();
+        if (!hit.hit)
+            return true;
+        BlockType target = world.get(hit.x, hit.y, hit.z);
+        if (button == SDL_BUTTON_LEFT)
+        {
+            if (target != BlockType::Air && target != BlockType::Water)
+            {
+                editCell({hit.x, hit.y, hit.z}, [&] { world.set(hit.x, hit.y, hit.z, BlockType::Air); });
+                brokenBlock = BlockPosition{hit.x, hit.y, hit.z};
+                breakEffectUntil = elapsedTime + 0.13f;
+            }
+        }
+        else if (!forcePlace && (target == BlockType::Button || target == BlockType::Sign))
+        {
+            if (firstPress && target == BlockType::Button)
+            {
+                editCell({hit.x, hit.y, hit.z}, [&] { world.toggleButton(hit.x, hit.y, hit.z); });
+            }
+            if (firstPress && target == BlockType::Sign)
+            {
+                gSignEditOpen = true;
+                gSignEditX = hit.x;
+                gSignEditY = hit.y;
+                gSignEditZ = hit.z;
+                gSignEditBuffer = world.getSignText(hit.x, hit.y, hit.z);
+                SDL_StartTextInput();
+            }
+            return !firstPress;
+        }
+        else if (canPlace(hit))
+        {
+            int x = hit.x + hit.nx, y = hit.y + hit.ny, z = hit.z + hit.nz;
+            editCell({x, y, z}, [&]
+            {
+                if (copiedSettings && copiedSettings->type == hotbarSlots[selected].type)
+                    copiedSettings->write(world, {x, y, z}, false);
+                else
+                {
+                    world.set(x, y, z, hotbarSlots[selected].type);
+                    world.setOrientation(x, y, z, placementTurns);
+                }
+            });
+            if (tutorial == 1 && hotbarSlots[selected].type == BlockType::Button)
+                tutorial = 2;
+            else if (tutorial == 2 && hotbarSlots[selected].type == BlockType::Wire)
+                tutorial = 3;
+            else if (tutorial == 3 && hotbarSlots[selected].type == BlockType::Led)
+            {
+                tutorial = 4;
+                poweredTutorialLed = BlockPosition{x, y, z};
+            }
+        }
+        return true;
+    };
+    Uint8 repeatingButton = 0;
+    float repeatAt = 0.0f;
     SDL_SetRelativeMouseMode(gMainMenuOpen ? SDL_FALSE : SDL_TRUE);
     SDL_ShowCursor(gMainMenuOpen ? SDL_TRUE : SDL_FALSE);
 
     std::cout << "Commandes: WASD/ZQSD deplacement, souris pour la camera, clic gauche miner, clic droit placer, "
-                 "1-8 changer de bloc, Space saut, Shift descendre, Double jump fly, R teleport to spawn, Esc menu pause/save/load.\n";
+                 "1-9 changer de bloc, Space saut, Shift descendre, Double jump fly, R teleport to spawn, Esc menu pause/save/load.\n";
 
     int winW = 1280, winH = 720;
-    SDL_GetWindowSize(window, &winW, &winH);
-    setup3D(window, winW, winH);
+    int displayW = 1280, displayH = 720;
+    float uiScale = 1.0f;
+    auto uiCoordinate = [&](int position) { return static_cast<int>(position / uiScale); };
+    auto resize = [&]
+    {
+        SDL_GetWindowSize(window, &displayW, &displayH);
+        uiScale = std::min({gConfig.uiSize / 100.0f, std::max(1, displayW) / 620.0f,
+                            std::max(1, displayH) / 520.0f});
+        winW = std::max(1, uiCoordinate(displayW));
+        winH = std::max(1, uiCoordinate(displayH));
+        int screenX, screenY;
+        SDL_GetMouseState(&screenX, &screenY);
+        mouseX = uiCoordinate(screenX);
+        mouseY = uiCoordinate(screenY);
+        setup3D(window, displayW, displayH);
+    };
+    resize();
+
+    auto settingsClick = [&](int x, int y)
+    {
+        int option = -1;
+        auto layout = computeSettingsLayout(winW, winH);
+        for (int i = 0; i < 16; ++i)
+        {
+            auto [left, top] = settingsOptionPosition(layout, i);
+            if (pointInRect(x, y, left, top, 158, 32))
+                option = i;
+        }
+        if (option < 0)
+            return false;
+        bindingStatus.clear();
+        binding = -1;
+        switch (option)
+        {
+        case 0: gConfig.fov = gConfig.fov >= 100 ? 55 : std::min(100, gConfig.fov + 5); resize(); break;
+        case 1: gConfig.invertY = !gConfig.invertY; break;
+        case 2: gConfig.smoothCamera = !gConfig.smoothCamera; break;
+        case 3: gConfig.uiSize = gConfig.uiSize >= 125 ? 75 : std::min(125, gConfig.uiSize + 25); resize(); break;
+        case 4: gConfig.highContrast = !gConfig.highContrast; break;
+        case 5: gConfig.toggleSprint = !gConfig.toggleSprint; break;
+        case 6:
+            gConfig.keyboardProfile = (gConfig.keyboardProfile + 1) % 3;
+            gConfig.movement = {};
+            gConfig.actions = Config{}.actions;
+            break;
+        case 7: gConfig.movement = {}; gConfig.actions = Config{}.actions; break;
+        default: binding = option - 8; return true;
+        }
+        saveConfig(gConfig);
+        return true;
+    };
+
+    int menuFocus = -1;
+    constexpr Uint32 keyboardPointer = SDL_TOUCH_MOUSEID - 1;
+    auto menuView = [&]
+    {
+        if (gSettingsMenuOpen) return 3;
+        if (saveMenuOpen) return 2;
+        if (pauseMenuOpen) return 1;
+        return gMainMenuOpen ? 0 : -1;
+    };
+    int focusedView = -1;
+    auto navigationPoints = [&]
+    {
+        std::vector<MenuPoint> points;
+        auto center = [&](float x, float y, float w, float h)
+        {
+            points.push_back({x + w / 2, y + h / 2});
+        };
+        if (gSettingsMenuOpen)
+        {
+            auto pane = computeSettingsLayout(winW, winH);
+            center(pane.sensMinusX, pane.sensMinusY, pane.sensMinusW, pane.sensMinusH);
+            center(pane.sensPlusX, pane.sensPlusY, pane.sensPlusW, pane.sensPlusH);
+            center(pane.fpsBoxX, pane.fpsBoxY, pane.fpsBoxW, pane.fpsBoxH);
+            center(pane.fullscreenBoxX, pane.fullscreenBoxY, pane.fullscreenBoxW, pane.fullscreenBoxH);
+            for (int i = 0; i < 16; ++i)
+            {
+                auto [x, y] = settingsOptionPosition(pane, i);
+                center(x, y, 158, 32);
+            }
+            center(pane.backX, pane.backY, pane.backW, pane.backH);
+        }
+        else if (saveMenuOpen)
+        {
+            auto pane = computeSaveMenuLayout(winW, winH);
+            center(pane.inputX, pane.inputY, pane.inputW, pane.inputH);
+            center(pane.createX, pane.createY, pane.createW, pane.createH);
+            center(pane.overwriteX, pane.overwriteY, pane.overwriteW, pane.overwriteH);
+            center(pane.loadX, pane.loadY, pane.loadW, pane.loadH);
+            for (int i = 0; i < 8; ++i)
+            {
+                auto [x, y] = saveActionPosition(pane, i);
+                center(x, y, pane.createW, 36);
+            }
+            center(pane.backX, pane.backY, pane.backW, pane.backH);
+        }
+        else if (gMainMenuOpen || pauseMenuOpen)
+        {
+            MenuImageLayout layout(winW, winH);
+            for (int i = 0; i < (pauseMenuOpen ? 4 : 3); ++i)
+            {
+                MenuPoint middle{};
+                for (const auto &corner : menuSigns[i])
+                {
+                    middle.x += corner.x / 4;
+                    middle.y += corner.y / 4;
+                }
+                points.push_back({layout.x + middle.x * layout.scale, layout.y + middle.y * layout.scale});
+            }
+            center(20, pauseMenuOpen ? 40 : 20, 152, 32);
+        }
+        return points;
+    };
 
     while (running)
     {
@@ -2264,13 +3153,13 @@ int main(int argc, char **argv)
         }
 
         // Applique la souris lissée ici pour stabiliser la camera
-        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !gMainMenuOpen && !gSettingsMenuOpen)
+        if (!confirmation && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !gMainMenuOpen && !gSettingsMenuOpen)
         {
             const float sensitivity = gConfig.mouseSensitivity;
             player.yaw += smoothDX * sensitivity;
-            player.pitch -= smoothDY * sensitivity;
-            smoothDX *= 0.5f;
-            smoothDY *= 0.5f;
+            player.pitch += smoothDY * sensitivity * (gConfig.invertY ? 1.0f : -1.0f);
+            smoothDX *= gConfig.smoothCamera ? 0.5f : 0.0f;
+            smoothDY *= gConfig.smoothCamera ? 0.5f : 0.0f;
             player.pitch = std::clamp(player.pitch, -1.5f, 1.5f);
         }
         else
@@ -2282,12 +3171,130 @@ int main(int argc, char **argv)
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
+            if (confirmation)
+            {
+                if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
+                    resize();
+                else if (e.type == SDL_MOUSEMOTION)
+                {
+                    mouseX = uiCoordinate(e.motion.x);
+                    mouseY = uiCoordinate(e.motion.y);
+                }
+                else if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
+                {
+                    mouseX = uiCoordinate(e.button.x);
+                    mouseY = uiCoordinate(e.button.y);
+                    int hit = ConfirmationLayout(winW, winH, confirmation->offerSave).hit(mouseX, mouseY);
+                    if (hit >= 0)
+                        resolveConfirmation(static_cast<ConfirmationChoice>(hit));
+                }
+                else if (e.type == SDL_KEYDOWN && !e.key.repeat)
+                {
+                    int count = confirmation->offerSave ? 3 : 2;
+                    auto key = e.key.keysym.sym;
+                    if (key == SDLK_ESCAPE)
+                        resolveConfirmation(ConfirmationChoice::Cancel);
+                    else if (key == SDLK_RETURN || key == SDLK_KP_ENTER)
+                        resolveConfirmation(static_cast<ConfirmationChoice>(confirmation->selected));
+                    else if (key == SDLK_LEFT || key == SDLK_RIGHT || key == SDLK_TAB)
+                    {
+                        bool reverse = key == SDLK_LEFT || (key == SDLK_TAB && (e.key.keysym.mod & KMOD_SHIFT));
+                        confirmation->selected = (confirmation->selected + count + (reverse ? -1 : 1)) % count;
+                    }
+                }
+                if (!running)
+                    break;
+                continue;
+            }
+            if (focusedView != menuView())
+            {
+                menuFocus = -1;
+                focusedView = menuView();
+            }
             if (e.type == SDL_QUIT)
             {
-                running = false;
+                requestQuit();
             }
             else if (e.type == SDL_KEYDOWN)
             {
+                if (gSettingsMenuOpen && binding >= 0 && !e.key.repeat)
+                {
+                    SDL_Keycode key = e.key.keysym.sym;
+                    bool reserved = key < 'a' || key > 'z';
+                    for (int i = 0; i < 8 && !reserved; ++i)
+                    {
+                        if (i == binding)
+                            continue;
+                        auto [primary, alternate] = movementKeys(gConfig, i);
+                        reserved = key == primary || key == alternate;
+                    }
+                    if (key == SDLK_ESCAPE)
+                    {
+                        binding = -1;
+                        bindingStatus.clear();
+                    }
+                    else if (reserved)
+                        bindingStatus = "TOUCHE RESERVEE OU DEJA UTILISEE";
+                    else
+                    {
+                        if (binding < 4)
+                            gConfig.movement[binding] = key;
+                        else
+                            gConfig.actions[binding - 4] = key;
+                        saveConfig(gConfig);
+                        binding = -1;
+                        bindingStatus.clear();
+                    }
+                    continue;
+                }
+                if (!e.key.repeat && (gMainMenuOpen || pauseMenuOpen) &&
+                    (e.key.keysym.sym == SDLK_TAB || e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
+                {
+                    const auto positions = navigationPoints();
+                    if (e.key.keysym.sym == SDLK_TAB && !positions.empty())
+                    {
+                        const int size = static_cast<int>(positions.size());
+                        if (e.key.keysym.mod & KMOD_SHIFT)
+                            menuFocus = (menuFocus < 0 ? size : menuFocus) - 1;
+                        else
+                            menuFocus = (menuFocus + 1) % size;
+                        if (menuFocus < 0)
+                            menuFocus = size - 1;
+                        mouseX = static_cast<int>(positions[menuFocus].x);
+                        mouseY = static_cast<int>(positions[menuFocus].y);
+                        gSaveInputFocus = false;
+                        continue;
+                    }
+                    if (menuFocus >= 0 && menuFocus < static_cast<int>(positions.size()))
+                    {
+                        const auto position = positions[menuFocus];
+                        SDL_Event click{};
+                        click.type = SDL_MOUSEBUTTONDOWN;
+                        click.button.which = keyboardPointer;
+                        click.button.button = SDL_BUTTON_LEFT;
+                        click.button.x = static_cast<int>(std::ceil(position.x * uiScale));
+                        click.button.y = static_cast<int>(std::ceil(position.y * uiScale));
+                        SDL_PushEvent(&click);
+                        continue;
+                    }
+                }
+                if (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_UP || e.key.keysym.sym == SDLK_DOWN)
+                    menuFocus = -1;
+                if (canPlay() && !e.key.repeat && gConfig.toggleSprint &&
+                    (e.key.keysym.sym == SDLK_LALT || e.key.keysym.sym == SDLK_RALT))
+                    sprintToggled = !sprintToggled;
+                if (!e.key.repeat && e.key.keysym.sym == SDLK_o && (e.key.keysym.mod & KMOD_CTRL) &&
+                    (gMainMenuOpen || canPlay()) && !gSettingsMenuOpen)
+                {
+                    gMainMenuOpen = false;
+                    pauseMenuOpen = saveMenuOpen = true;
+                    saveStatus.clear();
+                    gSaveInputFocus = false;
+                    refreshSaveList();
+                    SDL_SetRelativeMouseMode(SDL_FALSE);
+                    SDL_ShowCursor(SDL_TRUE);
+                    continue;
+                }
                 if (gMainMenuOpen)
                 {
                     if (e.key.keysym.sym == SDLK_ESCAPE)
@@ -2311,9 +3318,45 @@ int main(int argc, char **argv)
                         smoothDX = smoothDY = 0.0f;
                     }
                 }
+                else if (!e.key.repeat && e.key.keysym.sym == SDLK_s && (e.key.keysym.mod & KMOD_CTRL) &&
+                         (canPlay() || (pauseMenuOpen && !gSettingsMenuOpen)))
+                {
+                    if (e.key.keysym.mod & KMOD_SHIFT)
+                    {
+                        pauseMenuOpen = saveMenuOpen = true;
+                        saveStatus.clear();
+                        gSaveNameInput.clear();
+                        gSaveInputFocus = true;
+                        refreshSaveList();
+                        SDL_StartTextInput();
+                        SDL_SetRelativeMouseMode(SDL_FALSE);
+                        SDL_ShowCursor(SDL_TRUE);
+                    }
+                    else
+                    {
+                        saveCurrent();
+                    }
+                }
+                else if (saveMenuOpen && (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER) && !e.key.repeat)
+                {
+                    if (gSaveInputFocus)
+                        saveAs();
+                    else if (gSaveIndex >= 0 && gSaveIndex < static_cast<int>(gSaveList.size()))
+                        requestOpenMap(gSaveList[gSaveIndex]);
+                }
+                else if (saveMenuOpen && !gSaveList.empty() &&
+                         (e.key.keysym.sym == SDLK_UP || e.key.keysym.sym == SDLK_DOWN))
+                {
+                    int direction = e.key.keysym.sym == SDLK_UP ? -1 : 1;
+                    gSaveIndex = std::clamp(gSaveIndex + direction, 0, static_cast<int>(gSaveList.size()) - 1);
+                    saveOffset = std::clamp(saveOffset, std::max(0, gSaveIndex - saveRows + 1), gSaveIndex);
+                    gSaveInputFocus = false;
+                }
                 else if (e.key.keysym.sym == SDLK_ESCAPE)
                 {
-                    if (gSignEditOpen)
+                    if (pastePreview && canPlay())
+                        pastePreview = false;
+                    else if (gSignEditOpen)
                     {
                         gSignEditOpen = false;
                         SDL_StopTextInput();
@@ -2347,6 +3390,16 @@ int main(int argc, char **argv)
                     {
                         gSettingsMenuOpen = false;
                     }
+                    else if (inventoryOpen)
+                    {
+                        closeInventory();
+                    }
+                    else if (saveMenuOpen)
+                    {
+                        saveMenuOpen = false;
+                        gSaveInputFocus = false;
+                        SDL_StopTextInput();
+                    }
                     else if (pauseMenuOpen)
                     {
                         pauseMenuOpen = false;
@@ -2363,18 +3416,44 @@ int main(int argc, char **argv)
                         saveMenuOpen = false;
                         gSettingsMenuOpen = false;
                         refreshSaveList();
-                        inventoryOpen = false;
-                        pendingSlot = -1;
                         SDL_StopTextInput();
                         SDL_SetRelativeMouseMode(SDL_FALSE);
                         SDL_ShowCursor(SDL_TRUE);
                         smoothDX = smoothDY = 0.0f;
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_e && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen)
+                else if (inventoryOpen && e.key.keysym.sym == SDLK_TAB && !e.key.repeat)
                 {
-                    inventoryOpen = !inventoryOpen;
-                    pendingSlot = -1;
+                    cancelInventoryGesture();
+                    paletteOpen = !paletteOpen;
+                    if (paletteOpen)
+                    {
+                        refreshPalette();
+                        SDL_StartTextInput();
+                    }
+                    else
+                        SDL_StopTextInput();
+                }
+                else if (inventoryOpen && paletteOpen && e.key.keysym.sym == SDLK_BACKSPACE)
+                {
+                    if (!paletteSearch.empty())
+                        paletteSearch.pop_back();
+                    refreshPalette();
+                }
+                else if (inventoryOpen && paletteOpen && e.key.keysym.sym == SDLK_RETURN && !e.key.repeat)
+                {
+                    cancelInventoryGesture();
+                    paletteCategory = (paletteCategory + 1) % 4;
+                    refreshPalette();
+                }
+                else if (e.key.keysym.sym == gConfig.actions[0] && (!inventoryOpen || !paletteOpen) && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen)
+                {
+                    if (e.key.repeat)
+                        continue;
+                    if (inventoryOpen)
+                        closeInventory();
+                    else
+                        inventoryOpen = true;
                     SDL_SetRelativeMouseMode(inventoryOpen ? SDL_FALSE : SDL_TRUE);
                     SDL_ShowCursor(inventoryOpen ? SDL_TRUE : SDL_FALSE);
                     smoothDX = smoothDY = 0.0f;
@@ -2393,39 +3472,90 @@ int main(int argc, char **argv)
                         SDL_SetWindowFullscreen(window, 0);
                     }
                 }
-                else if (e.key.keysym.sym == SDLK_r && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen)
+                else if (canPlay() && !e.key.repeat && (e.key.keysym.mod & KMOD_CTRL) &&
+                         (e.key.keysym.sym == SDLK_z || e.key.keysym.sym == SDLK_y))
                 {
-                    float spawnX = WIDTH * 0.5f;
-                    float spawnZ = DEPTH * 0.5f;
-                    int sx = static_cast<int>(std::floor(spawnX));
-                    int sz = static_cast<int>(std::floor(spawnZ));
-                    int sy = world.surfaceY(sx, sz);
-                    if (sy < 0)
-                        sy = 0;
-                    // Find the first free spot above surface if blocked
-                    int checkY = sy + 1;
-                    auto blockedAt = [&](int y)
+                    if (history.apply(world, e.key.keysym.sym == SDLK_y, [&](BlockPosition position, BlockType type)
                     {
-                        if (y < 0 || y + 1 >= world.getHeight())
-                            return true;
-                        return isSolid(world.get(sx, y, sz)) || isSolid(world.get(sx, y + 1, sz));
-                    };
-                    while (checkY < world.getHeight() - 2 && blockedAt(checkY))
-                        ++checkY;
-                    if (checkY >= world.getHeight() - 1)
-                        checkY = world.getHeight() - 2;
-                    player.x = spawnX;
-                    player.z = spawnZ;
-                    player.y = static_cast<float>(checkY) + 0.2f;
+                        return !isSolid(type) || !blockIntersectsPlayer(player, position[0], position[1], position[2], PLAYER_HEIGHT);
+                    }, markNeighborsDirty))
+                        mapEdited = true;
                 }
-                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_8 && !gSignEditOpen &&
+                else if (canPlay() && !e.key.repeat && (e.key.keysym.mod & KMOD_CTRL) && e.key.keysym.sym == SDLK_b)
+                {
+                    HitInfo hit = targetBlock();
+                    if (hit.hit)
+                    {
+                        BlockPosition position{hit.x, hit.y, hit.z};
+                        if (!cornerA || cornerB)
+                        {
+                            cornerA = position;
+                            cornerB.reset();
+                        }
+                        else
+                            cornerB = position;
+                    }
+                }
+                else if (canPlay() && !e.key.repeat && (e.key.keysym.mod & KMOD_CTRL) && e.key.keysym.sym == SDLK_c)
+                    copySelection();
+                else if (canPlay() && !e.key.repeat && (e.key.keysym.mod & KMOD_CTRL) && e.key.keysym.sym == SDLK_v)
+                    pastePreview = !pastePreview && !clipboard.empty();
+                else if (canPlay() && pastePreview && !e.key.repeat && e.key.keysym.sym == SDLK_RETURN)
+                    pasteBlocks();
+                else if (canPlay() && !e.key.repeat && e.key.keysym.sym == gConfig.actions[2])
+                    resetPosition();
+                else if (canPlay() && !e.key.repeat && e.key.keysym.sym == gConfig.actions[3])
+                {
+                    if (pastePreview)
+                        rotateClipboard();
+                    else if (e.key.keysym.mod & KMOD_SHIFT)
+                    {
+                        HitInfo hit = targetBlock();
+                        if (hit.hit && isDirectional(world.get(hit.x, hit.y, hit.z)))
+                            editCell({hit.x, hit.y, hit.z}, [&]
+                            {
+                                world.setOrientation(hit.x, hit.y, hit.z, world.getOrientation(hit.x, hit.y, hit.z) + 1);
+                            });
+                    }
+                    else if (copiedSettings)
+                        copiedSettings->orientation = (copiedSettings->orientation + 1) & 3;
+                    else
+                        placementTurns = (placementTurns + 1) & 3;
+                    if (tutorial == 5 && hotbarSlots[selected].type == BlockType::NotGate)
+                        tutorial = 6;
+                }
+                else if (canPlay() && !e.key.repeat && e.key.keysym.sym == SDLK_F9)
+                {
+                    HitInfo hit = targetBlock();
+                    BlockPosition position{hit.x, hit.y, hit.z};
+                    if (hit.hit && probe != position)
+                        probe = position;
+                    else
+                        probe.reset();
+                    samples.clear();
+                }
+                else if (canPlay() && !e.key.repeat && (e.key.keysym.sym == SDLK_F3 || e.key.keysym.sym == SDLK_F4))
+                    exchangeTemplate(e.key.keysym.sym == SDLK_F4);
+                else if (canSimulate() && !e.key.repeat && e.key.keysym.sym == SDLK_F6)
+                    simulationPaused = !simulationPaused;
+                else if (canSimulate() && !e.key.repeat && e.key.keysym.sym == SDLK_F7 && simulationPaused)
+                    stepSimulation = true;
+                else if (canSimulate() && !e.key.repeat && e.key.keysym.sym == SDLK_F8)
+                    simulationRate = simulationRate == 20 ? 10 : (simulationRate == 10 ? 5 : 20);
+                else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_9 && !paletteOpen && !pauseMenuOpen && !gSignEditOpen &&
                          !gButtonEditOpen && !gWireInfoOpen && !gSplitterEditOpen && !gClockEditOpen)
                 {
                     selected = static_cast<int>(e.key.keysym.sym - SDLK_1);
-                    if (selected >= static_cast<int>(hotbarSlots.size()))
-                        selected = static_cast<int>(hotbarSlots.size()) - 1;
+                    if (inventoryOpen && !inventoryButton && !e.key.repeat)
+                    {
+                        if (ItemStack *slot = slotAt(hitTestInventoryUI(mouseX, mouseY, winW, winH)))
+                        {
+                            std::swap(*slot, hotbarSlots[selected]);
+                            mapEdited = true;
+                        }
+                    }
                 }
-                else if (saveMenuOpen && e.key.keysym.sym == SDLK_BACKSPACE)
+                else if (saveMenuOpen && gSaveInputFocus && e.key.keysym.sym == SDLK_BACKSPACE)
                 {
                     if (!gSaveNameInput.empty())
                         gSaveNameInput.pop_back();
@@ -2443,14 +3573,12 @@ int main(int argc, char **argv)
                 {
                     gSplitterOrder = !gSplitterOrder;
                 }
-                else if (saveMenuOpen && e.key.keysym.sym == SDLK_TAB)
-                {
-                    std::string suggested = stemFromPath(timestampSaveName());
-                    gSaveNameInput = normalizeSaveInput(suggested);
-                }
                 else if (gSignEditOpen && (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER))
                 {
-                    world.setSignText(gSignEditX, gSignEditY, gSignEditZ, gSignEditBuffer);
+                    editCell({gSignEditX, gSignEditY, gSignEditZ}, [&]
+                    {
+                        world.setSignText(gSignEditX, gSignEditY, gSignEditZ, gSignEditBuffer);
+                    });
                     markChunkFromBlock(gSignEditX, gSignEditY, gSignEditZ);
                     gSignEditOpen = false;
                     SDL_StopTextInput();
@@ -2508,8 +3636,11 @@ int main(int argc, char **argv)
                     v = std::clamp(v, 0, 255);
                     uint8_t mask = width >= 8 ? 0xFFu : static_cast<uint8_t>((1u << width) - 1u);
                     v &= mask;
-                    world.setButtonWidth(gButtonEditX, gButtonEditY, gButtonEditZ, static_cast<uint8_t>(width));
-                    world.setButtonValue(gButtonEditX, gButtonEditY, gButtonEditZ, static_cast<uint8_t>(v));
+                    editCell({gButtonEditX, gButtonEditY, gButtonEditZ}, [&]
+                    {
+                        world.setButtonWidth(gButtonEditX, gButtonEditY, gButtonEditZ, static_cast<uint8_t>(width));
+                        world.setButtonValue(gButtonEditX, gButtonEditY, gButtonEditZ, static_cast<uint8_t>(v));
+                    });
                     gButtonEditOpen = false;
                     SDL_StopTextInput();
                 }
@@ -2526,8 +3657,11 @@ int main(int argc, char **argv)
                         width = 1;
                     }
                     width = std::clamp(width, 1, 7);
-                    world.setSplitterWidth(gSplitterX, gSplitterY, gSplitterZ, static_cast<uint8_t>(width));
-                    world.setSplitterOrder(gSplitterX, gSplitterY, gSplitterZ, gSplitterOrder ? 1 : 0);
+                    editCell({gSplitterX, gSplitterY, gSplitterZ}, [&]
+                    {
+                        world.setSplitterWidth(gSplitterX, gSplitterY, gSplitterZ, static_cast<uint8_t>(width));
+                        world.setSplitterOrder(gSplitterX, gSplitterY, gSplitterZ, gSplitterOrder ? 1 : 0);
+                    });
                     gSplitterEditOpen = false;
                     SDL_StopTextInput();
                     SDL_SetRelativeMouseMode(SDL_TRUE);
@@ -2546,7 +3680,10 @@ int main(int argc, char **argv)
                         freq = 1;
                     }
                     freq = std::clamp(freq, 1, 255);
-                    world.setClockFreq(gClockEditX, gClockEditY, gClockEditZ, static_cast<uint8_t>(freq));
+                    editCell({gClockEditX, gClockEditY, gClockEditZ}, [&]
+                    {
+                        world.setClockFreq(gClockEditX, gClockEditY, gClockEditZ, static_cast<uint8_t>(freq));
+                    });
                     gClockEditOpen = false;
                     SDL_StopTextInput();
                     SDL_SetRelativeMouseMode(SDL_TRUE);
@@ -2574,6 +3711,7 @@ int main(int argc, char **argv)
                 else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !pauseMenuOpen &&
                          e.key.keysym.sym == SDLK_SPACE && e.key.repeat == 0)
                 {
+                    jumpUntil = elapsedTime + 0.12f;
                     if (lastSpaceTap >= 0.0f && (elapsedTime - lastSpaceTap) <= SPRINT_DOUBLE_TAP)
                     {
                         flying = !flying;
@@ -2583,7 +3721,8 @@ int main(int argc, char **argv)
                     lastSpaceTap = elapsedTime;
                 }
                 else if (!gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen &&
-                         (e.key.keysym.sym == SDLK_w || e.key.keysym.sym == SDLK_z) && e.key.repeat == 0)
+                         (e.key.keysym.sym == movementKeys(gConfig, 0).first ||
+                          e.key.keysym.sym == movementKeys(gConfig, 0).second) && e.key.repeat == 0)
                 {
                     if (lastForwardTap >= 0.0f && (elapsedTime - lastForwardTap) <= SPRINT_DOUBLE_TAP)
                     {
@@ -2591,7 +3730,7 @@ int main(int argc, char **argv)
                     }
                     lastForwardTap = elapsedTime;
                 }
-                else if (e.key.keysym.sym == SDLK_q && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen &&
+                else if (!(e.key.keysym.mod & KMOD_CTRL) && e.key.keysym.sym == movementKeys(gConfig, 5).first && !inventoryOpen && !pauseMenuOpen && !gSignEditOpen &&
                          !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen)
                 {
                     Vec3 fwd = forwardVec(player.yaw, player.pitch);
@@ -2652,8 +3791,11 @@ int main(int argc, char **argv)
             }
             else if (e.type == SDL_MOUSEMOTION)
             {
-                mouseX = e.motion.x;
-                mouseY = e.motion.y;
+                mouseX = uiCoordinate(e.motion.x);
+                mouseY = uiCoordinate(e.motion.y);
+                menuFocus = -1;
+                if (inventoryOpen && inventoryButton)
+                    visitDragSlot(hitTestInventoryUI(mouseX, mouseY, winW, winH));
                 if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen && !gMainMenuOpen && !gSettingsMenuOpen)
                 {
                     // Filtre de la souris pour lisser les mouvements et limiter les saccades
@@ -2690,13 +3832,18 @@ int main(int argc, char **argv)
             }
             else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
             {
-                winW = e.window.data1;
-                winH = e.window.data2;
-                setup3D(window, winW, winH);
+                resize();
             }
             else if (e.type == SDL_TEXTINPUT)
             {
-                if (saveMenuOpen)
+                if (inventoryOpen && paletteOpen)
+                {
+                    for (unsigned char c : std::string(e.text.text))
+                        if ((std::isalnum(c) || c == ' ' || c == '-') && paletteSearch.size() < 28)
+                            paletteSearch.push_back(static_cast<char>(std::tolower(c)));
+                    refreshPalette();
+                }
+                else if (saveMenuOpen)
                 {
                     const char *txt = e.text.text;
                     for (int i = 0; txt[i] != '\0'; ++i)
@@ -2767,11 +3914,54 @@ int main(int argc, char **argv)
                     }
                 }
             }
+            else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+            {
+                cancelInventoryGesture();
+                repeatingButton = 0;
+                sprinting = sprintToggled = false;
+                lastForwardTap = lastSpaceTap = jumpUntil = groundedUntil = -1.0f;
+                smoothDX = smoothDY = 0.0f;
+            }
+            else if (e.type == SDL_MOUSEBUTTONUP && e.button.button == repeatingButton)
+            {
+                repeatingButton = 0;
+            }
+            else if (e.type == SDL_MOUSEBUTTONUP && inventoryOpen && e.button.button == inventoryButton)
+            {
+                SlotHit release = hitTestInventoryUI(uiCoordinate(e.button.x), uiCoordinate(e.button.y), winW, winH);
+                visitDragSlot(release);
+                bool right = inventoryButton == SDL_BUTTON_RIGHT;
+                if (dragging)
+                    distributeItems(held, dragSlots, right);
+                else if (ItemStack *slot = slotAt(release); slot && slot == slotAt(pressSlot))
+                    clickStack(held, *slot, right);
+                if (pressSlot.isHotbar || release.isHotbar ||
+                    std::any_of(dragSlots.begin(), dragSlots.end(), [&](ItemStack *slot)
+                    {
+                        return std::any_of(hotbarSlots.begin(), hotbarSlots.end(),
+                                           [slot](ItemStack &entry) { return &entry == slot; });
+                    }))
+                    mapEdited = true;
+                cancelInventoryGesture();
+            }
             else if (e.type == SDL_MOUSEBUTTONDOWN)
             {
+                mouseX = uiCoordinate(e.button.x);
+                mouseY = uiCoordinate(e.button.y);
+                if (e.button.which != keyboardPointer)
+                    menuFocus = -1;
                 if (gMainMenuOpen)
                 {
-
+                    if (e.button.button != SDL_BUTTON_LEFT)
+                        continue;
+                    if (!gSettingsMenuOpen && pointInRect(mouseX, mouseY, 20, 20, 152, 32))
+                    {
+                        gMainMenuOpen = false;
+                        pauseMenuOpen = saveMenuOpen = true;
+                        gSaveInputFocus = false;
+                        refreshSaveList();
+                        continue;
+                    }
                     if (gSettingsMenuOpen)
                     {
                         SettingsMenuLayout s = computeSettingsLayout(winW, winH);
@@ -2780,6 +3970,8 @@ int main(int argc, char **argv)
                         bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH);
                         bool hoverFullscreen = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH);
                         bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW, s.backH);
+                        if (settingsClick(mouseX, mouseY))
+                            continue;
                         if (hoverMinus)
                         {
                             gConfig.mouseSensitivity = std::max(0.002f, gConfig.mouseSensitivity - 0.001f);
@@ -2804,11 +3996,13 @@ int main(int argc, char **argv)
                         else if (hoverBack)
                         {
                             gSettingsMenuOpen = false;
+                            binding = -1;
+                            bindingStatus.clear();
                         }
                         continue;
                     }
                     if (e.button.button != SDL_BUTTON_LEFT) continue;
-                    int sign = MenuImageLayout(winW,winH).signAt(e.button.x,e.button.y,false);
+                    int sign = MenuImageLayout(winW,winH).signAt(mouseX,mouseY,false);
                     if (sign == 0)
                     {
                         gMainMenuOpen = false;
@@ -2839,6 +4033,8 @@ int main(int argc, char **argv)
                     continue;
                 if (pauseMenuOpen)
                 {
+                    if (e.button.button != SDL_BUTTON_LEFT)
+                        continue;
                     if (gSettingsMenuOpen)
                     {
                         SettingsMenuLayout s = computeSettingsLayout(winW, winH);
@@ -2847,6 +4043,8 @@ int main(int argc, char **argv)
                         bool hoverFps = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fpsBoxX, s.fpsBoxY, s.fpsBoxW, s.fpsBoxH);
                         bool hoverFullscreen = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.fullscreenBoxX, s.fullscreenBoxY, s.fullscreenBoxW, s.fullscreenBoxH);
                         bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW, s.backH);
+                        if (settingsClick(mouseX, mouseY))
+                            continue;
                         if (hoverMinus)
                         {
                             gConfig.mouseSensitivity = std::max(0.002f, gConfig.mouseSensitivity - 0.001f);
@@ -2871,6 +4069,8 @@ int main(int argc, char **argv)
                         else if (hoverBack)
                         {
                             gSettingsMenuOpen = false;
+                            binding = -1;
+                            bindingStatus.clear();
                         }
                         continue;
                     }
@@ -2909,81 +4109,97 @@ int main(int argc, char **argv)
                             gSaveInputFocus = false;
                         }
 
+                        int action = -1;
+                        for (int i = 0; i < 8; ++i)
+                        {
+                            auto [x, y] = saveActionPosition(sm, i);
+                            if (pointInRect(mouseX, mouseY, x, y, sm.createW, 36.0f))
+                                action = i;
+                        }
+                        if (action == 0)
+                            saveCurrent();
+                        else if (action == 1)
+                            requestNewMap(false);
+                        else if (action == 2 || action == 3)
+                            duplicateOrRename(action == 2);
+                        else if (action == 4 && !gSaveList.empty())
+                            requestOpenMap(gSaveList.front());
+                        else if (action == 5 || action == 6)
+                        {
+#ifdef _WIN32
+                            namespace fs = std::filesystem;
+                            bool exporting = action == 6;
+                            if (exporting && (gSaveIndex < 0 || gSaveIndex >= static_cast<int>(gSaveList.size())))
+                                continue;
+                            fs::path external = chooseMapFile(window, exporting);
+                            if (external.empty())
+                                continue;
+                            fs::path internal = exporting ? fs::path(gSaveList[gSaveIndex]) : gMapsDir / (normalizeSaveInput(external.stem().u8string()) + ".bulldog");
+                            std::error_code ec;
+                            if (!exporting)
+                            {
+                                World candidate(WIDTH, HEIGHT, DEPTH);
+                                uint32_t importedSeed;
+                                if (!loadWorldFromFile(candidate, external, importedSeed))
+                                {
+                                    saveStatus = "FORMAT DE CARTE INVALIDE";
+                                    continue;
+                                }
+                            }
+                            const fs::path &from = exporting ? internal : external;
+                            const fs::path &to = exporting ? external : internal;
+                            fs::copy_file(from, to, exporting ? fs::copy_options::overwrite_existing : fs::copy_options::none, ec);
+                            if (ec)
+                                saveStatus = "COPIE IMPOSSIBLE OU NOM DEJA UTILISE";
+                            else
+                            {
+                                saveStatus = exporting ? "CARTE EXPORTEE" : "CARTE IMPORTEE";
+                                if (fs::exists(from.string() + ".hotbar", ec) && !ec)
+                                    fs::copy_file(from.u8string() + ".hotbar", to.u8string() + ".hotbar",
+                                                  exporting ? fs::copy_options::overwrite_existing : fs::copy_options::none, ec);
+                                if (ec)
+                                    saveStatus += " - BARRE RAPIDE NON COPIEE";
+                            }
+                            refreshSaveList();
+#else
+                            saveStatus = "COPIEZ LES FICHIERS BULLDOG VIA LE DOSSIER MAPS";
+#endif
+                        }
+                        else if (action == 7)
+                            requestNewMap(true);
+
                         if (hoverCreate)
                         {
-                            std::string path = buildSavePathFromInput(gSaveNameInput);
-                            std::error_code lookupError;
-                            if (std::filesystem::exists(path, lookupError))
-                            {
-                                saveStatus = "CE NOM EXISTE DEJA";
-                                continue;
-                            }
-                            bool ok = saveWorldToFile(world, path, seed);
-                            saveStatus = ok ? "CARTE ENREGISTREE" : "ECHEC DE LA SAUVEGARDE";
-                            std::cout << (ok ? "Sauvegarde OK: " : "Sauvegarde KO: ") << path << "\n";
-                            if (ok)
-                            {
-                                refreshSaveList();
-                                int idx = findSaveIndexByStem(stemFromPath(path));
-                                if (idx >= 0)
-                                {
-                                    gSaveIndex = idx;
-                                    saveOffset = std::max(0, idx-saveRows+1);
-                                }
-                                gSaveNameInput = normalizeSaveInput(stemFromPath(path));
-                                gSaveInputFocus = false;
-                            }
+                            saveAs();
                         }
-                        else if (hoverOverwrite && gSaveIndex >= 0)
+                        else if (gSaveIndex >= 0 && gSaveIndex < static_cast<int>(gSaveList.size()))
                         {
-                            std::string path;
-                            if (gSaveIndex >= 0 && gSaveIndex < static_cast<int>(gSaveList.size()))
-                                path = gSaveList[gSaveIndex];
-                            else
-                                path = timestampSaveName();
-                            bool ok = saveWorldToFile(world, path, seed);
-                            saveStatus = ok ? "CARTE ENREGISTREE" : "ECHEC DE LA SAUVEGARDE";
-                            std::cout << (ok ? "Sauvegarde OK: " : "Sauvegarde KO: ") << path << "\n";
-                            if (ok)
-                            {
-                                refreshSaveList();
-                                if (!gSaveList.empty())
-                                    gSaveIndex = 0;
-                            }
+                            const std::string path = gSaveList[gSaveIndex];
+                            if (hoverOverwrite)
+                                requestConfirmation("REMPLACER LA SAUVEGARDE ?", stemFromPath(path).substr(0, 52), false,
+                                                    [&, path] { saveMap(path); });
+                            else if (hoverLoad)
+                                requestOpenMap(path);
                         }
-                        else if (hoverLoad)
-                        {
-                            if (gSaveIndex >= 0 && gSaveIndex < static_cast<int>(gSaveList.size()))
-                            {
-                                std::string path = gSaveList[gSaveIndex];
-                                uint32_t newSeed = seed;
-                                bool ok = loadWorldFromFile(world, path, newSeed);
-                                if (ok)
-                                {
-                                    markAllChunksDirty();
-                                    seed = newSeed;
-                                    player.x = WIDTH * 0.5f;
-                                    player.z = DEPTH * 0.5f;
-                                    player.y =
-                                        world.surfaceY(static_cast<int>(player.x), static_cast<int>(player.z)) + 0.2f;
-                                }
-                                saveStatus = ok ? "CARTE CHARGEE" : "ECHEC DU CHARGEMENT";
-                                std::cout << (ok ? "Chargement OK: " : "Chargement KO: ") << path << "\n";
-                            }
-                        }
-                        else if (hoverBack)
+                        if (hoverBack)
                         {
                             saveMenuOpen = false;
+                            gSaveInputFocus = false;
                             SDL_StopTextInput();
                         }
                     }
                     else
                     {
                         if (e.button.button != SDL_BUTTON_LEFT) continue;
-                        int sign = MenuImageLayout(winW,winH).signAt(e.button.x,e.button.y,true);
+                        if (pointInRect(mouseX, mouseY, 20, 40, 152, 32))
+                        {
+                            saveCurrent();
+                            continue;
+                        }
+                        int sign = MenuImageLayout(winW,winH).signAt(mouseX,mouseY,true);
                         if (sign == 3)
                         {
-                            running = false;
+                            requestQuit();
                         }
                         else if (sign == 2)
                         {
@@ -3013,203 +4229,249 @@ int main(int argc, char **argv)
                 }
                 else if (inventoryOpen)
                 {
-                    if (e.button.button == SDL_BUTTON_LEFT)
+                    inventoryFull = false;
+                    const Uint8 button = e.button.button;
+                    if (inventoryButton)
+                        continue;
+                    SlotHit hit = hitTestInventoryUI(uiCoordinate(e.button.x), uiCoordinate(e.button.y), winW, winH);
+                    if (paletteOpen && hit.valid && !hit.isHotbar && paletteSlots[hit.idx].count)
                     {
-                        SlotHit hit = hitTestInventoryUI(mouseX, mouseY, winW, winH);
-                        if (!hit.valid)
+                        BlockType type = paletteSlots[hit.idx].type;
+                        if (button == SDL_BUTTON_MIDDLE)
                         {
-                            pendingSlot = -1;
+                            if (!favorites.erase(type))
+                                favorites.insert(type);
+                            refreshPalette();
+                            mapEdited = true;
                         }
-                        else if (pendingSlot < 0)
+                        else if (!held.count || held.type == type)
                         {
-                            pendingSlot = hit.idx;
-                            pendingIsHotbar = hit.isHotbar;
+                            ItemStack stock{type, maxStackSize};
+                            moveItems(stock, held, button == SDL_BUTTON_RIGHT ? 1 : maxStackSize);
                         }
-                        else
+                        continue;
+                    }
+                    if (button != SDL_BUTTON_LEFT && button != SDL_BUTTON_RIGHT)
+                        continue;
+                    ItemStack *slot = slotAt(hit);
+                    if (button == SDL_BUTTON_LEFT && (SDL_GetModState() & KMOD_SHIFT))
+                    {
+                        bool bulk = e.button.clicks == 2 && slot == lastShiftSlot;
+                        if (slot && (slot->count || bulk))
                         {
-                            ItemStack *a =
-                                pendingIsHotbar ? &hotbarSlots[pendingSlot] : &inventorySlots[pendingSlot];
-                            ItemStack *b = hit.isHotbar ? &hotbarSlots[hit.idx] : &inventorySlots[hit.idx];
-                            if (a && b)
-                            {
-                                std::swap(*a, *b);
-                            }
-                            pendingSlot = -1;
+                            auto &source = hit.isHotbar ? hotbarSlots : inventorySlots;
+                            auto &destination = hit.isHotbar ? inventorySlots : hotbarSlots;
+                            const BlockType type = bulk ? lastShiftType : slot->type;
+                            lastShiftSlot = slot;
+                            lastShiftType = type;
+                            mapEdited = true;
+                            if (slot->type == type)
+                                storeItems(*slot, destination);
+                            if (bulk)
+                                for (ItemStack &other : source)
+                                    if (other.type == type)
+                                        storeItems(other, destination);
                         }
                     }
-                }
-                else
-                {
-                    Vec3 fwd = forwardVec(player.yaw, player.pitch);
-                    float eyeY = player.y + EYE_HEIGHT;
-                    HitInfo hit = raycast(world, player.x, eyeY, player.z, fwd.x, fwd.y, fwd.z, 8.0f);
-                    if (hit.hit)
+                    else if (button == SDL_BUTTON_LEFT && e.button.clicks == 2 && slot)
                     {
-                        if (e.button.button == SDL_BUTTON_LEFT)
+                        mapEdited = true;
+                        if (!held.count)
+                            clickStack(held, *slot, false);
+                        for (auto *zone : {&inventorySlots, &hotbarSlots})
+                            for (ItemStack &other : *zone)
+                                if (held.count && held.type == other.type)
+                                    moveItems(other, held, maxStackSize);
+                    }
+                    else
+                    {
+                        inventoryButton = button;
+                        pressSlot = hit;
+                        visitDragSlot(hit);
+                    }
+                }
+                else if (canPlay())
+                {
+                    if (e.button.button == SDL_BUTTON_MIDDLE)
+                    {
+                        HitInfo hit = targetBlock();
+                        if (hit.hit)
                         {
-                            BlockType bt = world.get(hit.x, hit.y, hit.z);
-                            if (bt != BlockType::Air && bt != BlockType::Water)
-                            {
-                                world.set(hit.x, hit.y, hit.z, BlockType::Air);
-                                markNeighborsDirty(hit.x, hit.y, hit.z);
-                            }
-                        }
-                        else if (e.button.button == SDL_BUTTON_RIGHT)
-                        {
-                            BlockType target = world.get(hit.x, hit.y, hit.z);
-                            if (target == BlockType::Sign)
-                            {
-                                gSignEditOpen = true;
-                                gSignEditX = hit.x;
-                                gSignEditY = hit.y;
-                                gSignEditZ = hit.z;
-                                gSignEditBuffer = world.getSignText(hit.x, hit.y, hit.z);
-                                SDL_StartTextInput();
-                            }
-                            else if (target == BlockType::Button)
-                            {
-                                world.toggleButton(hit.x, hit.y, hit.z);
-                            }
+                            BlockType type = world.get(hit.x, hit.y, hit.z);
+                            if (type == BlockType::Air)
+                                continue;
+                            mapEdited = true;
+                            copiedSettings.reset();
+                            if (SDL_GetModState() & KMOD_CTRL)
+                                copiedSettings = BlockState::read(world, {hit.x, hit.y, hit.z});
+                            auto found = std::find_if(hotbarSlots.begin(), hotbarSlots.end(),
+                                                      [type](const ItemStack &slot) { return slot.type == type; });
+                            if (found != hotbarSlots.end())
+                                selected = static_cast<int>(found - hotbarSlots.begin());
                             else
                             {
-                                int nx = hit.x + hit.nx;
-                                int ny = hit.y + hit.ny;
-                                int nz = hit.z + hit.nz;
-                                if (world.inside(nx, ny, nz) && !isSolid(world.get(nx, ny, nz)) &&
-                                    !blockIntersectsPlayer(player, nx, ny, nz, PLAYER_HEIGHT))
-                                {
-                                    ItemStack &slot = hotbarSlots[selected];
-                                    if (slot.type != BlockType::Air)
-                                    {
-                                        BlockType toPlace = slot.type;
-                                        world.set(nx, ny, nz, toPlace);
-                                        markNeighborsDirty(nx, ny, nz);
-                                    }
-                                }
+                                storeItems(hotbarSlots[selected], inventorySlots);
+                                if (!hotbarSlots[selected].count)
+                                    hotbarSlots[selected] = {type, maxStackSize};
                             }
                         }
                     }
+                    else if (e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT)
+                    {
+                        bool forcePlace = (SDL_GetModState() & KMOD_SHIFT) != 0;
+                        repeatingButton = editBlock(e.button.button, true, forcePlace) ? e.button.button : 0;
+                        repeatAt = elapsedTime + 0.20f;
+                    }
                 }
+            }
+            if (!canPlay())
+            {
+                repeatingButton = 0;
+                sprinting = sprintToggled = false;
+                lastForwardTap = lastSpaceTap = jumpUntil = groundedUntil = -1.0f;
             }
         }
 
-        float simDt = (pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen || gClockEditOpen || gMainMenuOpen || gSettingsMenuOpen) ? 0.0f : dt;
+        if (!running)
+            break;
+        const bool play = canPlay();
+        if (!play)
+        {
+            repeatingButton = 0;
+            sprinting = sprintToggled = false;
+            lastForwardTap = lastSpaceTap = jumpUntil = groundedUntil = -1.0f;
+        }
+        if (play && mapEdited && elapsedTime >= nextAutosave)
+        {
+            std::string base = activeMap.empty() ? std::to_string(seed) : stemFromPath(activeMap);
+            std::string name = "recuperation-" + base + "-" + std::to_string(autosaveSlot + 1) + ".bulldog";
+            std::string path = (gMapsDir / name).string();
+            if (saveWorldToFile(world, path, seed))
+            {
+                saveHotbar(path, hotbarSlots, selected, favorites);
+                autosaveSlot = (autosaveSlot + 1) % 3;
+            }
+            nextAutosave = elapsedTime + 120.0f;
+        }
+        const float simDt = play ? std::min(dt, 0.04f) : 0.0f;
+        if (play && repeatingButton && elapsedTime >= repeatAt)
+        {
+            editBlock(repeatingButton, false, (SDL_GetModState() & KMOD_SHIFT) != 0);
+            repeatAt = elapsedTime + 0.12f;
+        }
 
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
-        // Movement uses a purely horizontal forward vector (independent of pitch)
-        Vec3 fwd{std::sin(player.yaw), 0.0f, -std::cos(player.yaw)};
-        Vec3 right{std::cos(player.yaw), 0.0f, std::sin(player.yaw)};
-        float moveSpeed = SPEED * (sprinting ? (flying ? FLY_SPRINT_MULT : SPRINT_MULT) : 1.0f);
-        bool forwardHeld = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_Z];
-
-        if (!inventoryOpen && !pauseMenuOpen && !gSignEditOpen)
+        const SDL_Keymod mods = SDL_GetModState();
+        auto movementHeld = [&](int index)
         {
-            if (forwardHeld)
+            auto [primary, alternate] = movementKeys(gConfig, index);
+            auto heldKey = [&](SDL_Keycode key)
             {
-                player.vx += fwd.x * moveSpeed * simDt;
-                player.vz += fwd.z * moveSpeed * simDt;
-            }
-            if (keys[SDL_SCANCODE_S])
-            {
-                player.vx -= fwd.x * moveSpeed * simDt;
-                player.vz -= fwd.z * moveSpeed * simDt;
-            }
-            if (keys[SDL_SCANCODE_A])
-            {
-                player.vx -= right.x * moveSpeed * simDt;
-                player.vz -= right.z * moveSpeed * simDt;
-            }
-            if (keys[SDL_SCANCODE_D])
-            {
-                player.vx += right.x * moveSpeed * simDt;
-                player.vz += right.z * moveSpeed * simDt;
-            }
+                return key != SDLK_UNKNOWN && !(key == SDLK_z && (mods & KMOD_CTRL)) &&
+                       keys[SDL_GetScancodeFromKey(key)];
+            };
+            return heldKey(primary) || heldKey(alternate);
+        };
+        bool forwardHeld = movementHeld(0);
+        bool leftHeld = movementHeld(2);
+        bool onGround = collidesAt(world, player.x, player.y - 0.05f, player.z, PLAYER_HEIGHT);
+        bool crouching = play && !flying && (mods & KMOD_SHIFT);
+        if (!forwardHeld || !play || crouching)
+            sprinting = false;
+
+        if (play)
+        {
+            Vec3 fwd{std::sin(player.yaw), 0.0f, -std::cos(player.yaw)};
+            Vec3 right{std::cos(player.yaw), 0.0f, std::sin(player.yaw)};
+            bool fast = forwardHeld && !crouching && (sprinting || (gConfig.toggleSprint ? sprintToggled : (mods & KMOD_ALT) != 0));
+            float moveSpeed = SPEED * (fast ? (flying ? FLY_SPRINT_MULT : SPRINT_MULT) : 1.0f);
+            if (crouching)
+                moveSpeed *= 0.35f;
+            float forward = static_cast<int>(forwardHeld) - static_cast<int>(movementHeld(1));
+            float sideways = static_cast<int>(movementHeld(3)) - static_cast<int>(leftHeld);
+            float length = std::max(1.0f, std::hypot(forward, sideways));
+            player.vx += (fwd.x * forward + right.x * sideways) * moveSpeed * simDt / length;
+            player.vz += (fwd.z * forward + right.z * sideways) * moveSpeed * simDt / length;
 
             if (flying)
             {
-                // Vol : Espace monte, Shift descend, sans gravité
-                player.vy = 0.0f;
-                float flyVertSpeed = moveSpeed * FLY_VERTICAL_MULT;
-                if (keys[SDL_SCANCODE_SPACE])
-                {
-                    player.vy = flyVertSpeed;
-                }
-                else if (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT])
-                {
-                    player.vy = -flyVertSpeed;
-                }
+                player.vy = (static_cast<int>(keys[SDL_SCANCODE_SPACE]) - static_cast<int>((mods & KMOD_SHIFT) != 0)) *
+                            moveSpeed * FLY_VERTICAL_MULT;
             }
             else
             {
-                // Sol : saut unique tant qu'on est au sol (pas de montée infinie en maintenant Espace)
-                bool onGround =
-                    collidesAt(world, player.x, player.y - 0.05f, player.z, PLAYER_HEIGHT);
-                if (keys[SDL_SCANCODE_SPACE] && onGround)
+                if (onGround && player.vy <= 0.0f)
+                    groundedUntil = elapsedTime + 0.08f;
+                if (elapsedTime <= jumpUntil && elapsedTime <= groundedUntil)
                 {
                     player.vy = JUMP;
+                    jumpUntil = groundedUntil = -1.0f;
                 }
-                if (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT])
+            }
+        }
+        const int motionSteps = std::max(1, static_cast<int>(std::ceil(simDt * 120.0f)));
+        const float step = simDt / motionSteps;
+        for (int iteration = 0; step > 0.0f && iteration < motionSteps; ++iteration)
+        {
+            if (!flying)
+                player.vy += (player.vy > 0.0f ? RISING_GRAVITY : FALLING_GRAVITY) * step;
+
+            float nextY = player.y + player.vy * step;
+            nextY = std::min(nextY, HEIGHT - PLAYER_HEIGHT - 0.01f);
+            bool hitVertical = collidesAt(world, player.x, nextY, player.z, PLAYER_HEIGHT);
+            if (hitVertical)
+            {
+                nextY = player.y;
+                if (player.vy < 0.0f)
                 {
-                    player.vy = -JUMP;
+                    nextY = std::floor(player.y) + 0.001f;
                 }
+                else if (player.vy > 0.0f)
+                {
+                    // clamp just below the ceiling block the head hit
+                    nextY = std::ceil(player.y + PLAYER_HEIGHT) - PLAYER_HEIGHT - 0.001f;
+                }
+                player.vy = 0.0f;
             }
-        }
-        if (!forwardHeld || inventoryOpen || pauseMenuOpen || gSignEditOpen || gButtonEditOpen || gSplitterEditOpen || gWireInfoOpen || gClockEditOpen)
-        {
-            sprinting = false;
-        }
-        if (!flying)
-            player.vy += GRAVITY * simDt;
 
-        float nextY = player.y + player.vy * simDt;
-        nextY = std::clamp(nextY, PLAYER_HEIGHT * 0.5f, HEIGHT - 2.0f);
-        bool hitVertical = collidesAt(world, player.x, nextY, player.z, PLAYER_HEIGHT);
-        if (hitVertical)
-        {
-            if (player.vy < 0.0f)
+            bool stayOnEdge = crouching && player.vy <= 0.0f &&
+                              collidesAt(world, player.x, nextY - 0.06f, player.z, PLAYER_HEIGHT);
+            float nextX = player.x + player.vx * step;
+            nextX = std::clamp(nextX, 1.0f, WIDTH - 2.0f);
+            if (collidesAt(world, nextX, nextY, player.z, PLAYER_HEIGHT) ||
+                (stayOnEdge && !collidesAt(world, nextX, nextY - 0.06f, player.z, PLAYER_HEIGHT)))
             {
-                nextY = std::floor(player.y) + 0.001f;
+                nextX = player.x;
+                player.vx = 0.0f;
             }
-            else if (player.vy > 0.0f)
+
+            float nextZ = player.z + player.vz * step;
+            nextZ = std::clamp(nextZ, 1.0f, DEPTH - 2.0f);
+            if (collidesAt(world, nextX, nextY, nextZ, PLAYER_HEIGHT) ||
+                (stayOnEdge && !collidesAt(world, nextX, nextY - 0.06f, nextZ, PLAYER_HEIGHT)))
             {
-                // clamp just below the ceiling block the head hit
-                nextY = std::ceil(player.y + PLAYER_HEIGHT) - PLAYER_HEIGHT - 0.001f;
+                nextZ = player.z;
+                player.vz = 0.0f;
             }
-            player.vy = 0.0f;
-        }
 
-        float nextX = player.x + player.vx * simDt;
-        nextX = std::clamp(nextX, 1.0f, WIDTH - 2.0f);
-        if (collidesAt(world, nextX, nextY, player.z, PLAYER_HEIGHT))
-        {
-            nextX = player.x;
-            player.vx = 0.0f;
-        }
+            player.x = nextX;
+            player.y = nextY;
+            player.z = nextZ;
+            if (player.y < -4.0f)
+                resetPosition();
 
-        float nextZ = player.z + player.vz * simDt;
-        nextZ = std::clamp(nextZ, 1.0f, DEPTH - 2.0f);
-        if (collidesAt(world, nextX, nextY, nextZ, PLAYER_HEIGHT))
-        {
-            nextZ = player.z;
-            player.vz = 0.0f;
-        }
-
-        player.x = nextX;
-        player.y = nextY;
-        player.z = nextZ;
-
-        // If we touched the ground while flying, disable fly mode
-        bool onGroundNow = collidesAt(world, player.x, player.y - 0.05f, player.z, PLAYER_HEIGHT);
-        if (flying && onGroundNow)
-        {
-            flying = false;
-            player.vy = 0.0f;
+            // If we touched the ground while flying, disable fly mode
+            bool onGroundNow = collidesAt(world, player.x, player.y - 0.05f, player.z, PLAYER_HEIGHT);
+            if (flying && onGroundNow && player.vy < 0.0f)
+            {
+                flying = false;
+                player.vy = 0.0f;
+            }
         }
 
         // Frame-rate independent damping (was frame-based 0.85)
         float damp = std::pow(0.85f, simDt / (1.0f / 60.0f));
         player.vx *= damp;
-        player.vy *= damp;
         player.vz *= damp;
 
         updateNpc(npc, world, simDt);
@@ -3237,7 +4499,8 @@ int main(int argc, char **argv)
                                 s.fullscreenBoxW, s.fullscreenBoxH);
                 bool hoverBack = pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), s.backX, s.backY, s.backW,
                                              s.backH);
-                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen);
+                drawSettingsMenu(winW, winH, s, gConfig, hoverBack, hoverMinus, hoverPlus, hoverFps, hoverFullscreen,
+                                 mouseX, mouseY, binding, bindingStatus);
             }
             else if (saveMenuOpen)
             {
@@ -3251,15 +4514,63 @@ int main(int argc, char **argv)
                 bool hoverCreate =
                     pointInRect(static_cast<float>(mouseX), static_cast<float>(mouseY), sm.createX, sm.createY, sm.createW,
                                 sm.createH);
-                drawSaveMenu(winW, winH, sm, gSaveIndex, hoverCreate, hoverOverwrite, hoverLoad, hoverBack, gSaveNameInput);
+                drawSaveMenu(winW, winH, sm, gSaveIndex, hoverCreate, hoverOverwrite, hoverLoad, hoverBack, gSaveNameInput, mouseX, mouseY);
             }
+            if (gMainMenuOpen && !gSettingsMenuOpen)
+                menuButton(20, 20, 152, 32, "CARTES",
+                           pointInRect(mouseX, mouseY, 20, 20, 152, 32));
+            if (pauseMenuOpen && !saveMenuOpen && !gSettingsMenuOpen)
+            {
+                std::string label = activeMap.empty() ? "CARTE SANS NOM" : stemFromPath(activeMap).substr(0, 40);
+                hudText(20, 20, 2, label + (mapEdited ? " *" : ""));
+                menuButton(20, 40, 152, 32, "ENREGISTRER",
+                           pointInRect(mouseX, mouseY, 20, 40, 152, 32));
+                if (elapsedTime < saveNoticeUntil)
+                    hudText(20, 86, 2, saveStatus);
+            }
+            if (menuFocus >= 0 && focusedView == menuView())
+                drawOutline(mouseX - 5.0f, mouseY - 5.0f, 10, 10, 1.0f, 1.0f, 1.0f, 0.9f, 2);
+            if (confirmation)
+                drawMapConfirmation(winW, winH, *confirmation, mouseX, mouseY);
             endHud();
             SDL_GL_SwapWindow(window);
             updateTitle(window);
             continue;
         }
 
-        updateLogic(world, markChunkFromBlock);
+        auto advanceTick = [&]
+        {
+            updateLogic(world, markChunkFromBlock);
+            if (tutorial == 4 && poweredTutorialLed)
+            {
+                const auto [x, y, z] = *poweredTutorialLed;
+                if (world.get(x, y, z) == BlockType::Led && world.getPower(x, y, z))
+                    tutorial = 5;
+            }
+            if (probe)
+            {
+                const auto [x, y, z] = *probe;
+                if (samples.size() == 48)
+                    samples.pop_front();
+                samples.emplace_back(world.getPower(x, y, z), world.getPowerWidth(x, y, z));
+            }
+        };
+        const bool simulate = canSimulate();
+        if (simulate && !simulationPaused)
+        {
+            const float interval = 1.0f / simulationRate;
+            tickBudget = std::min(tickBudget + dt, 2.0f * interval);
+            while (tickBudget >= interval)
+            {
+                advanceTick();
+                tickBudget -= interval;
+            }
+        }
+        else if (simulate && stepSimulation)
+        {
+            advanceTick();
+        }
+        stepSimulation = false;
         glClearColor(0.55f, 0.75f, 0.95f, 1);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glLoadIdentity();
@@ -3355,11 +4666,82 @@ int main(int argc, char **argv)
         Vec3 fwdCast = forwardVec(player.yaw, player.pitch);
         float eyeY = player.y + EYE_HEIGHT;
         HitInfo hit = raycast(world, player.x, eyeY, player.z, fwdCast.x, fwdCast.y, fwdCast.z, 8.0f);
+        auto drawPorts = [&](BlockType type, BlockPosition cell, uint8_t turns, bool preview)
+        {
+            bool blocked = false;
+            const auto [x, y, z] = cell;
+            for (const auto &port : circuitPorts(type))
+            {
+                auto [dx, dz] = rotateHorizontal(port.x, port.z, turns);
+                int px = x + dx, py = y + port.y, pz = z + dz;
+                bool inside = world.inside(px, py, pz);
+                BlockType neighbor = inside ? world.get(px, py, pz) : BlockType::Air;
+                bool incompatible = !inside || (isSolid(neighbor) && neighbor < BlockType::AndGate);
+                if (isDirectional(neighbor))
+                {
+                    const auto otherTurns = world.getOrientation(px, py, pz);
+                    const auto &otherPorts = circuitPorts(neighbor);
+                    incompatible = std::none_of(otherPorts.begin(), otherPorts.end(), [&](const CircuitPort &other)
+                    {
+                        auto [ox, oz] = rotateHorizontal(other.x, other.z, otherTurns);
+                        return ox == -dx && oz == -dz && other.y == -port.y && other.output != port.output;
+                    });
+                }
+                blocked |= incompatible;
+                float reach = preview ? 0.51f : 0.54f;
+                Vec3 center{x + 0.5f + dx * reach, y + 0.5f + port.y * reach, z + 0.5f + dz * reach};
+                Vec3 axis{static_cast<float>(dx), static_cast<float>(port.y), static_cast<float>(dz)};
+                Vec3 wing = dx || dz ? Vec3{0, 0.10f, 0} : Vec3{0.10f, 0, 0};
+                float direction = port.output ? 1.0f : -1.0f;
+                Vec3 tip{center.x + axis.x * direction * 0.19f, center.y + axis.y * direction * 0.19f,
+                         center.z + axis.z * direction * 0.19f};
+                if (incompatible)
+                    glColor3f(1.0f, 0.29f, 0.18f);
+                else if (port.output)
+                    glColor3f(1.0f, 0.83f, 0.17f);
+                else
+                    glColor3f(0.30f, 0.83f, 1.0f);
+                glBegin(GL_TRIANGLES);
+                glVertex3f(tip.x, tip.y, tip.z);
+                glVertex3f(center.x + wing.x, center.y + wing.y, center.z + wing.z);
+                glVertex3f(center.x - wing.x, center.y - wing.y, center.z - wing.z);
+                glEnd();
+            }
+            return blocked;
+        };
+        bool incompatiblePorts = false;
         HoverLabel hoverLabel;
-        if (hit.hit)
+        if (play && hit.hit)
         {
             drawFaceHighlight(hit);
+            drawBlockOutlineExact(hit.x, hit.y, hit.z);
+            BlockType aimed = world.get(hit.x, hit.y, hit.z);
+            if (isDirectional(aimed))
+                incompatiblePorts = drawPorts(aimed, {hit.x, hit.y, hit.z}, world.getOrientation(hit.x, hit.y, hit.z), false);
+            if (canPlace(hit) && !pastePreview)
+            {
+                drawOutlinedCube(hit.x + hit.nx + 0.5f, hit.y + hit.ny + 0.5f, hit.z + hit.nz + 0.5f, 1.004f);
+                const BlockType selectedType = hotbarSlots[selected].type;
+                const uint8_t orientation = copiedSettings && copiedSettings->type == selectedType ?
+                                            copiedSettings->orientation : placementTurns;
+                drawPorts(selectedType, {hit.x + hit.nx, hit.y + hit.ny, hit.z + hit.nz}, orientation, true);
+            }
+            if (pastePreview && validPaste(hit))
+                for (const auto &entry : clipboard)
+                {
+                    const auto [dx, dy, dz] = entry.first;
+                    drawBlockOutlineExact(hit.x + hit.nx + dx, hit.y + hit.ny + dy, hit.z + hit.nz + dz);
+                }
         }
+        if (play && brokenBlock && elapsedTime < breakEffectUntil)
+            drawOutlinedCube((*brokenBlock)[0] + 0.5f, (*brokenBlock)[1] + 0.5f, (*brokenBlock)[2] + 0.5f,
+                             0.25f + 4.0f * (breakEffectUntil - elapsedTime));
+        if (play && probe)
+            drawBlockOutlineExact((*probe)[0], (*probe)[1], (*probe)[2]);
+        if (play && cornerA)
+            drawBlockOutlineExact((*cornerA)[0], (*cornerA)[1], (*cornerA)[2]);
+        if (play && cornerB)
+            drawBlockOutlineExact((*cornerB)[0], (*cornerB)[1], (*cornerB)[2]);
 
         beginHud(winW, winH);
         if (gConfig.showFps)
@@ -3370,14 +4752,97 @@ int main(int argc, char **argv)
             drawOutline(10.0f, 10.0f, 120.0f, 32.0f, 1.0f, 1.0f, 1.0f, 0.12f, 2.0f);
             drawTextTiny(16.0f, 16.0f, 2.4f, fpsBuf, 1.0f, 0.97f, 0.9f, 1.0f);
         }
+        if (elapsedTime < saveNoticeUntil)
+            hudText(20.0f, 56.0f, 2, saveStatus);
         if (!inventoryOpen && !pauseMenuOpen)
         {
             drawCrosshair(winW, winH);
             drawInventoryBar(winW, winH, hotbarSlots, selected);
+            if (play)
+            {
+                hudText(20.0f, 88.0f, 2, simulationStatus());
+                if (tutorial > 0)
+                {
+                    static constexpr const char *steps[] = {"", "1  POSEZ UN BOUTON AVEC LE CLIC DROIT",
+                        "2  POSEZ UN FIL A COTE DU BOUTON", "3  POSEZ UNE LED AU BOUT DU FIL",
+                        "4  ACTIVEZ LE BOUTON ET OBSERVEZ LA LED", "", "6  CTRL+S POUR ENREGISTRER", "CIRCUIT ENREGISTRE"};
+                    std::string label = tutorial == 5 ? std::string("5  CHOISISSEZ LA PORTE (4), TOURNEZ AVEC ") +
+                                                       SDL_GetKeyName(gConfig.actions[3]) : steps[tutorial];
+                    hudText(20, winH - 130.0f, 2, label);
+                }
+                if (pastePreview)
+                    hudText(20.0f, 106.0f, 2, validPaste(hit) ?
+                            std::string("ENTREE COLLER   ") + SDL_GetKeyName(gConfig.actions[3]) + " TOURNER" : "COLLAGE BLOQUE");
+                if (probe)
+                {
+                    drawQuad(20, 134, 258, 86, 0.04f, 0.04f, 0.06f, 0.88f);
+                    std::string label = "SONDE";
+                    if (!samples.empty())
+                        label += " " + std::to_string(samples.back().first) + " / " + std::to_string(samples.back().second) + " BITS";
+                    hudText(28, 142, 2, label);
+                    float x = 29.0f;
+                    for (const auto &[value, width] : samples)
+                    {
+                        int maxValue = (1 << std::clamp<int>(width, 1, 8)) - 1;
+                        float bar = 1.0f + 52.0f * std::min<int>(value, maxValue) / maxValue;
+                        drawQuad(x, 211.0f - bar, 4.0f, bar, 1.0f, 0.84f, 0.35f, 1.0f);
+                        x += 5.0f;
+                    }
+                }
+                if (hotbarSlots[selected].count)
+                {
+                    const BlockType selectedType = hotbarSlots[selected].type;
+                    std::string label = std::to_string(selected + 1) + "  " + BLOCKS.at(selectedType).name;
+                    if (isDirectional(selectedType))
+                    {
+                        const int turns = copiedSettings && copiedSettings->type == selectedType ?
+                                          copiedSettings->orientation : placementTurns;
+                        label += std::string("  ") + SDL_GetKeyName(gConfig.actions[3]) + " " + std::to_string(turns * 90);
+                    }
+                    hudText(20.0f, winH - 30.0f, 2, label);
+                }
+                if (hit.hit)
+                {
+                    const BlockType type = world.get(hit.x, hit.y, hit.z);
+                    if (type == BlockType::Wire)
+                    {
+                        std::string signal = std::to_string(world.getPower(hit.x, hit.y, hit.z)) + " / " +
+                                             std::to_string(world.getPowerWidth(hit.x, hit.y, hit.z)) + " BITS";
+                        hudText(winW * 0.5f + 18, winH * 0.5f + 12, 2, signal);
+                    }
+                    else if (type == BlockType::Button)
+                    {
+                        hudText(winW * 0.5f + 18, winH * 0.5f + 12, 2,
+                                std::string(SDL_GetKeyName(movementKeys(gConfig, 5).first)) + " REGLAGES");
+                        hudText(winW * 0.5f + 18, winH * 0.5f + 32, 2, "CLIC DROIT ACTIONNER");
+                    }
+                    else if (type == BlockType::Sign)
+                        hudText(winW * 0.5f + 18, winH * 0.5f + 12, 2, "CLIC DROIT INTERAGIR");
+                    else if (isDirectional(type))
+                    {
+                        bool configurable = type == BlockType::Clock || type == BlockType::Splitter || type == BlockType::Merger;
+                        std::string hint = configurable ? std::string(SDL_GetKeyName(movementKeys(gConfig, 5).first)) + " REGLAGES   " : "";
+                        hint += std::string("MAJ+") + SDL_GetKeyName(gConfig.actions[3]) + " TOURNER";
+                        hudText(winW * 0.5f + 18, winH * 0.5f + 12, 2, hint);
+                        if (incompatiblePorts)
+                            hudText(winW * 0.5f + 18, winH * 0.5f + 27, 2, "PORT BLOQUE OU INCOMPATIBLE");
+                    }
+                    else if (hotbarSlots[selected].count && !canPlace(hit))
+                        hudText(winW * 0.5f + 18, winH * 0.5f + 12, 2, "POSE BLOQUEE");
+                }
+            }
         }
         if (inventoryOpen)
-            drawInventoryPanel(winW, winH, inventorySlots, hotbarSlots, pendingSlot, pendingIsHotbar, mouseX, mouseY,
-                               hoverLabel);
+        {
+            static constexpr const char *categories[] = {"TOUT", "MATERIAUX", "LOGIQUE", "FAVORIS"};
+            const std::string title = paletteOpen ? std::string(categories[paletteCategory]) + "  " + paletteSearch : "INVENTAIRE";
+            drawInventoryPanel(winW, winH, paletteOpen ? paletteSlots : inventorySlots, hotbarSlots, held, dragSlots, dragging,
+                               inventoryButton == SDL_BUTTON_RIGHT, mouseX, mouseY, hoverLabel, title,
+                               paletteOpen ? "TAB INVENTAIRE   ENTREE CATEGORIE   MOLETTE FAVORI" : "TAB PALETTE   1-9 RACCOURCIS",
+                               paletteOpen ? &favorites : nullptr);
+            if (inventoryFull)
+                hudText(20, 24, 2, "INVENTAIRE PLEIN - RANGEZ LA PILE");
+        }
         if (hoverLabel.valid)
             drawTooltip(hoverLabel.x, hoverLabel.y, winW, winH, hoverLabel.text);
         if (gSignEditOpen)
@@ -3396,10 +4861,12 @@ int main(int argc, char **argv)
                 uint8_t mask = gWireInfoWidth >= 8 ? 0xFFu : static_cast<uint8_t>((1u << gWireInfoWidth) - 1u);
                 gWireInfoValue = static_cast<uint8_t>(world.getPower(gWireInfoX, gWireInfoY, gWireInfoZ) & mask);
             }
-            drawWireInfoBox(winW, winH, gWireInfoWidth, gWireInfoValue);
+            drawWireInfoBox(winW, winH, gWireInfoWidth, gWireInfoValue, simulationStatus());
         }
         if (gSplitterEditOpen)
             drawSplitterEditBox(winW, winH, gSplitterIsMerger, gSplitterWidthBuffer, gSplitterOrder);
+        if (confirmation)
+            drawMapConfirmation(winW, winH, *confirmation, mouseX, mouseY);
         endHud();
 
         SDL_GL_SwapWindow(window);

@@ -22,6 +22,9 @@ public:
 
     BlockType get(int x, int y, int z) const;
     void set(int x, int y, int z, BlockType b);
+    uint8_t getOrientation(int x, int y, int z) const;
+    void setOrientation(int x, int y, int z, uint8_t turns);
+    bool hasRotatedBlocks() const;
     uint8_t getPower(int x, int y, int z) const;
     uint8_t getPowerWidth(int x, int y, int z) const;
     void setPower(int x, int y, int z, uint8_t v);
@@ -58,6 +61,7 @@ private:
     int height;
     int depth;
     std::vector<BlockType> tiles;
+    std::vector<uint8_t> orientation;
     std::vector<uint8_t> power;
     std::vector<uint8_t> powerWidth;
     std::vector<uint8_t> buttonState;

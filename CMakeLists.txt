@@ -16,6 +16,10 @@ if(BUILD_TESTING)
   add_test(NAME snapshot COMMAND snapshot_test
     "${CMAKE_CURRENT_SOURCE_DIR}/maps/example map.bulldog"
     "${CMAKE_CURRENT_SOURCE_DIR}/maps/syslog.bulldog")
+  add_executable(editing_test tests/editing.cpp)
+  target_include_directories(editing_test PRIVATE src)
+  target_link_libraries(editing_test PRIVATE logicraft_core)
+  add_test(NAME editing COMMAND editing_test)
 endif()
 
 option(LOGICRAFT_BUILD_CLIENT "Build the graphical SDL client" ON)
@@ -49,6 +53,7 @@ target_include_directories(logicraft PRIVATE
 )
 
 if(WIN32)
+  target_link_libraries(logicraft PRIVATE comdlg32)
   set(LOGICRAFT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/images/logicraft.ico")
   if(EXISTS "${LOGICRAFT_ICON}")
     target_sources(logicraft PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/logicraft.rc")

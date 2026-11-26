@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "inventory.hpp"
 #include "world_types.hpp"
 
 struct NPC
@@ -28,13 +29,6 @@ struct NPC
     float dirZ = 0.0f;
     float timeUntilTurn = 0.0f;
 };
-
-struct ItemStack
-{
-    BlockType type = BlockType::Air;
-    int count = 0;
-};
-
 
 struct SaveMenuLayout
 {

@@ -1087,7 +1087,7 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
     };
 
     auto addFace = [&](int x, int y, int z, const int nx, const int ny, const int nz, const std::array<float, 3> &col,
-                       int tile, float emissive, bool toGlass)
+                       int tile, float emissive, bool toGlass, uint8_t turns)
     {
         auto &vec = toGlass ? mesh.glassVerts : mesh.verts;
         float bx = static_cast<float>(x);
@@ -1120,6 +1120,12 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
             float r = std::clamp(br * shade, 0.0f, 1.0f);
             float g = std::clamp(bg * shade, 0.0f, 1.0f);
             float b = std::clamp(bb * shade, 0.0f, 1.0f);
+            if (ny && turns)
+            {
+                const auto [lx, lz] = rotateHorizontal(px == bx ? -1 : 1, pz == bz ? -1 : 1, 4 - turns);
+                u = lx < 0 ? u1 : u0;
+                v = lz < 0 ? v1 : v0;
+            }
             vec.push_back(Vertex{px, py, pz, u, v, r, g, b});
         };
 
@@ -1406,10 +1412,10 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     }
                 }
                 int tIdx = tileIndexFor(b);
-                auto faceTile = [&](int nx, int ny, int nz)
+                const uint8_t turns = world.getOrientation(x, y, z);
+                auto faceTile = [&](int worldX, int ny, int worldZ)
                 {
-                    (void)nx;
-                    (void)nz;
+                    const auto [nx, nz] = rotateHorizontal(worldX, worldZ, 4 - turns);
                     if (ny == 1 && b == BlockType::Grass)
                         return gGrassTopTile;
                     if (ny == -1 && b == BlockType::Grass)
@@ -1785,12 +1791,12 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                 };
 
                 if (x == 0 || (!occludesFaces(world.get(x - 1, y, z)) && !(isGlass && neighborIsGlass(x - 1, y, z))))
-                    addFace(x, y, z, -1, 0, 0, color, faceTile(-1, 0, 0), emissive, isGlass);
+                    addFace(x, y, z, -1, 0, 0, color, faceTile(-1, 0, 0), emissive, isGlass, turns);
                 if (x == world.getWidth() - 1 ||
                     (!occludesFaces(world.get(x + 1, y, z)) && !(isGlass && neighborIsGlass(x + 1, y, z))))
-                    addFace(x, y, z, 1, 0, 0, color, faceTile(1, 0, 0), emissive, isGlass);
+                    addFace(x, y, z, 1, 0, 0, color, faceTile(1, 0, 0), emissive, isGlass, turns);
                 if (y == 0 || (!occludesFaces(world.get(x, y - 1, z)) && !(isGlass && neighborIsGlass(x, y - 1, z))))
-                    addFace(x, y, z, 0, -1, 0, color, faceTile(0, -1, 0), emissive, isGlass);
+                    addFace(x, y, z, 0, -1, 0, color, faceTile(0, -1, 0), emissive, isGlass, turns);
                 if (y == world.getHeight() - 1 ||
                     (!occludesFaces(world.get(x, y + 1, z)) && !(isGlass && neighborIsGlass(x, y + 1, z))))
                 {
@@ -1798,13 +1804,13 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     // Printed labels already carry their component colour in the atlas.
                     bool printed = top != tIdx && b != BlockType::Grass;
                     std::array<float, 3> neutral = {brightness, brightness, brightness};
-                    addFace(x, y, z, 0, 1, 0, printed ? neutral : color, top, emissive, isGlass);
+                    addFace(x, y, z, 0, 1, 0, printed ? neutral : color, top, emissive, isGlass, turns);
                 }
                 if (z == 0 || (!occludesFaces(world.get(x, y, z - 1)) && !(isGlass && neighborIsGlass(x, y, z - 1))))
-                    addFace(x, y, z, 0, 0, -1, color, faceTile(0, 0, -1), emissive, isGlass);
+                    addFace(x, y, z, 0, 0, -1, color, faceTile(0, 0, -1), emissive, isGlass, turns);
                 if (z == world.getDepth() - 1 ||
                     (!occludesFaces(world.get(x, y, z + 1)) && !(isGlass && neighborIsGlass(x, y, z + 1))))
-                    addFace(x, y, z, 0, 0, 1, color, faceTile(0, 0, 1), emissive, isGlass);
+                    addFace(x, y, z, 0, 0, 1, color, faceTile(0, 0, 1), emissive, isGlass, turns);
             }
         }
     }

@@ -67,7 +67,7 @@ bool isTransparent(BlockType b)
 }
 
 World::World(int w, int h, int d)
-    : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), power(w * h * d, 0),
+    : width(w), height(h), depth(d), tiles(w * h * d, BlockType::Air), orientation(w * h * d, 0), power(w * h * d, 0),
       powerWidth(w * h * d, 8), buttonState(w * h * d, 0), buttonValue(w * h * d, 0),
       buttonWidth(w * h * d, 0), splitterWidth(w * h * d, 1), splitterOrder(w * h * d, 0),
       clockFreq(w * h * d, 0), signText(w * h * d)
@@ -80,6 +80,7 @@ void World::set(int x, int y, int z, BlockType b)
 {
     int idx = index(x, y, z);
     tiles[idx] = b;
+    orientation[idx] = 0;
     power[idx] = 0;
     powerWidth[idx] = 8;
     if (b != BlockType::Button)
@@ -113,6 +114,19 @@ void World::set(int x, int y, int z, BlockType b)
     }
     if (b != BlockType::Sign)
         signText[idx].clear();
+}
+
+uint8_t World::getOrientation(int x, int y, int z) const { return orientation[index(x, y, z)]; }
+
+void World::setOrientation(int x, int y, int z, uint8_t turns)
+{
+    int i = index(x, y, z);
+    orientation[i] = isDirectional(tiles[i]) ? turns & 3 : 0;
+}
+
+bool World::hasRotatedBlocks() const
+{
+    return std::any_of(orientation.begin(), orientation.end(), [](uint8_t turns) { return turns != 0; });
 }
 
 uint8_t World::getPower(int x, int y, int z) const { return power[index(x, y, z)]; }
@@ -517,16 +531,47 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
             {
                 BlockType b = world.get(x, y, z);
                 uint8_t out = 0;
+                const uint8_t turns = world.getOrientation(x, y, z);
+                auto port = [&](int dx, int dy, int dz)
+                {
+                    const auto [rx, rz] = rotateHorizontal(dx, dz, turns);
+                    return std::array<int, 3>{x + rx, y + dy, z + rz};
+                };
+                auto powerAtLocal = [&](int dx, int dy, int dz)
+                {
+                    const auto [px, py, pz] = port(dx, dy, dz);
+                    return powerAt(px, py, pz);
+                };
+                auto widthAtLocal = [&](int dx, int dy, int dz)
+                {
+                    const auto [px, py, pz] = port(dx, dy, dz);
+                    return widthAt(px, py, pz);
+                };
+                auto pushWireLocal = [&](int dx, int dy, int dz, uint8_t value, uint8_t width)
+                {
+                    const auto [px, py, pz] = port(dx, dy, dz);
+                    pushWire(px, py, pz, value, width);
+                };
+                auto setPowerLocal = [&](int dx, int dy, int dz, uint8_t value, uint8_t width)
+                {
+                    const auto [px, py, pz] = port(dx, dy, dz);
+                    setPower(px, py, pz, value, width);
+                };
+                auto getLocal = [&](int dx, int dy, int dz)
+                {
+                    const auto [px, py, pz] = port(dx, dy, dz);
+                    return world.inside(px, py, pz) ? world.get(px, py, pz) : BlockType::Air;
+                };
                 switch (b)
                 {
                 case BlockType::AndGate:
                 {
-                    uint8_t inA = powerAt(x - 1, y, z);
-                    uint8_t inB = powerAt(x + 1, y, z);
-                    uint8_t w = static_cast<uint8_t>(std::min(widthAt(x - 1, y, z), widthAt(x + 1, y, z)));
+                    uint8_t inA = powerAtLocal(-1, 0, 0);
+                    uint8_t inB = powerAtLocal(+1, 0, 0);
+                    uint8_t w = static_cast<uint8_t>(std::min(widthAtLocal(-1, 0, 0), widthAtLocal(+1, 0, 0)));
                     if (w == 0)
                         w = 8;
-                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) - 1u);
+                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) -1u);
                     out = static_cast<uint8_t>((inA & mask) & (inB & mask));
                     if (out)
                     {
@@ -538,12 +583,12 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                 }
                 case BlockType::OrGate:
                 {
-                    uint8_t inA = powerAt(x - 1, y, z);
-                    uint8_t inB = powerAt(x + 1, y, z);
-                    uint8_t w = static_cast<uint8_t>(std::min(widthAt(x - 1, y, z), widthAt(x + 1, y, z)));
+                    uint8_t inA = powerAtLocal(-1, 0, 0);
+                    uint8_t inB = powerAtLocal(+1, 0, 0);
+                    uint8_t w = static_cast<uint8_t>(std::min(widthAtLocal(-1, 0, 0), widthAtLocal(+1, 0, 0)));
                     if (w == 0)
                         w = 8;
-                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) - 1u);
+                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) -1u);
                     out = static_cast<uint8_t>((inA & mask) | (inB & mask));
                     if (out)
                     {
@@ -555,12 +600,12 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                 }
                 case BlockType::XorGate:
                 {
-                    uint8_t inA = powerAt(x - 1, y, z);
-                    uint8_t inB = powerAt(x + 1, y, z);
-                    uint8_t w = static_cast<uint8_t>(std::min(widthAt(x - 1, y, z), widthAt(x + 1, y, z)));
+                    uint8_t inA = powerAtLocal(-1, 0, 0);
+                    uint8_t inB = powerAtLocal(+1, 0, 0);
+                    uint8_t w = static_cast<uint8_t>(std::min(widthAtLocal(-1, 0, 0), widthAtLocal(+1, 0, 0)));
                     if (w == 0)
                         w = 8;
-                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) - 1u);
+                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) -1u);
                     out = static_cast<uint8_t>((inA & mask) ^ (inB & mask));
                     if (out)
                     {
@@ -576,19 +621,19 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                     uint8_t storedW = world.getPowerWidth(x, y, z);
                     if (storedW == 0)
                         storedW = 8;
-                    uint8_t storedMask = storedW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << storedW) - 1u);
+                    uint8_t storedMask = storedW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << storedW) -1u);
                     storedQ &= storedMask;
-                    uint8_t dIn = powerAt(x + 1, y, z);        // D on +X
-                    uint8_t dW = widthAt(x + 1, y, z);
+                    uint8_t dIn = powerAtLocal(+1, 0, 0);        // D on +X
+                    uint8_t dW = widthAtLocal(+1, 0, 0);
                     if (dW == 0)
                         dW = 8;
-                    uint8_t clk = powerAt(x - 1, y, z) ? 1 : 0; // CLK on -X (bool)
+                    uint8_t clk = powerAtLocal(-1, 0, 0) ? 1 : 0; // CLK on -X (bool)
                     uint8_t prevClk = world.getButtonState(x, y, z) ? 1 : 0;
                     uint8_t nextQ = storedQ;
                     uint8_t nextW = storedW ? storedW : dW;
                     if (clk && !prevClk)
                     {
-                        uint8_t mask = dW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << dW) - 1u);
+                        uint8_t mask = dW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << dW) -1u);
                         nextQ = static_cast<uint8_t>(dIn & mask); // latch on rising edge
                         nextW = dW;
                     }
@@ -610,16 +655,16 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                 }
                 case BlockType::AddGate:
                 {
-                    uint8_t wP = widthAt(x - 1, y, z);
-                    uint8_t wQ = widthAt(x + 1, y, z);
+                    uint8_t wP = widthAtLocal(-1, 0, 0);
+                    uint8_t wQ = widthAtLocal(+1, 0, 0);
                     uint8_t bitWidth = static_cast<uint8_t>(std::min<uint8_t>(std::max<uint8_t>(wP ? wP : 1, wQ ? wQ : 1), 8));
                     if (bitWidth == 0)
                         bitWidth = 1;
-                    uint8_t mask = bitWidth >= 8 ? 0xFFu : static_cast<uint8_t>((1u << bitWidth) - 1u);
+                    uint8_t mask = bitWidth >= 8 ? 0xFFu : static_cast<uint8_t>((1u << bitWidth) -1u);
 
-                    uint8_t p = powerAt(x - 1, y, z) & mask;   // P on -X
-                    uint8_t q = powerAt(x + 1, y, z) & mask;   // Q on +X
-                    uint8_t cin = powerAt(x, y, z - 1) ? 1 : 0; // Cin on -Z (bool)
+                    uint8_t p = powerAtLocal(-1, 0, 0) & mask;   // P on -X
+                    uint8_t q = powerAtLocal(+1, 0, 0) & mask;   // Q on +X
+                    uint8_t cin = powerAtLocal(0, 0, -1) ? 1 : 0; // Cin on -Z (bool)
                     uint16_t res = static_cast<uint16_t>(p) + static_cast<uint16_t>(q) +
                                    static_cast<uint16_t>(cin);
                     uint8_t sum = static_cast<uint8_t>(res & mask);
@@ -641,11 +686,11 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                 }
                 case BlockType::NotGate:
                 {
-                    uint8_t w = widthAt(x + 1, y, z);
+                    uint8_t w = widthAtLocal(+1, 0, 0);
                     if (w == 0)
                         w = 8;
-                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) - 1u);
-                    uint8_t inA = powerAt(x + 1, y, z) & mask; // input on +X (right)
+                    uint8_t mask = w >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w) -1u);
+                    uint8_t inA = powerAtLocal(+1, 0, 0) & mask; // input on +X (right)
                     out = static_cast<uint8_t>(~inA & mask);
                     if (out)
                     {
@@ -661,7 +706,7 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                     uint8_t width = world.getButtonWidth(x, y, z);
                     if (width == 0)
                         width = 8;
-                    uint8_t mask = (width >= 8) ? 0xFFu : static_cast<uint8_t>((1u << width) - 1u);
+                    uint8_t mask = (width >= 8) ? 0xFFu : static_cast<uint8_t>((1u << width) -1u);
                     out = active ? static_cast<uint8_t>(world.getButtonValue(x, y, z) & mask) : 0;
                     if (out)
                         nextWidth[idx(x, y, z)] = width;
@@ -670,25 +715,25 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                 case BlockType::Counter:
                 {
                     // Single input on +X
-                    uint8_t val = powerAt(x + 1, y, z);
+                    uint8_t val = powerAtLocal(+1, 0, 0);
                     next[idx(x, y, z)] = val;
-                    nextWidth[idx(x, y, z)] = widthAt(x + 1, y, z);
+                    nextWidth[idx(x, y, z)] = widthAtLocal(+1, 0, 0);
                     out = 0;
                     break;
                 }
                 case BlockType::Splitter:
                 {
-                    uint8_t busW = widthAt(x, y, z - 1);
+                    uint8_t busW = widthAtLocal(0, 0, -1);
                     if (busW == 0)
                         busW = 1;
-                    uint8_t busMask = busW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << busW) - 1u);
-                    uint8_t busVal = powerAt(x, y, z - 1) & busMask;
+                    uint8_t busMask = busW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << busW) -1u);
+                    uint8_t busVal = powerAtLocal(0, 0, -1) & busMask;
                     uint8_t wParam = world.getSplitterWidth(x, y, z);
                     uint8_t order = world.getSplitterOrder(x, y, z);
-                    uint8_t w1 = std::clamp<uint8_t>(wParam, 1, static_cast<uint8_t>(std::max<int>(1, busW - 1)));
+                    uint8_t w1 = std::clamp<uint8_t>(wParam, 1, static_cast<uint8_t>(std::max<int>(1, busW -1)));
                     uint8_t w2 = static_cast<uint8_t>(std::max<int>(1, busW - w1));
-                    uint8_t mask1 = w1 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w1) - 1u);
-                    uint8_t mask2 = w2 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w2) - 1u);
+                    uint8_t mask1 = w1 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w1) -1u);
+                    uint8_t mask2 = w2 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w2) -1u);
                     uint8_t out1 = 0, out2 = 0;
                     if (order == 0)
                     {
@@ -701,9 +746,9 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                         out1 = static_cast<uint8_t>((busVal >> w2) & mask1); // MSB chunk -> B1 (-X)
                     }
                     if (out1)
-                        pushWire(x - 1, y, z, out1, w1); // B1 on -X
+                        pushWireLocal(-1, 0, 0, out1, w1); // B1 on -X
                     if (out2)
-                        pushWire(x + 1, y, z, out2, w2); // B2 on +X
+                        pushWireLocal(+1, 0, 0, out2, w2); // B2 on +X
                     out = 0;
                     break;
                 }
@@ -711,18 +756,18 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                 {
                     uint8_t wParam = world.getSplitterWidth(x, y, z);
                     uint8_t order = world.getSplitterOrder(x, y, z);
-                    uint8_t inW1 = widthAt(x - 1, y, z);
-                    uint8_t inW2 = widthAt(x + 1, y, z);
+                    uint8_t inW1 = widthAtLocal(-1, 0, 0);
+                    uint8_t inW2 = widthAtLocal(+1, 0, 0);
                     if (inW1 == 0)
                         inW1 = 8;
                     if (inW2 == 0)
                         inW2 = 8;
                     uint8_t w1 = std::clamp<uint8_t>(wParam, 1, 7);
                     uint8_t w2 = static_cast<uint8_t>(std::max<int>(1, std::min<int>(8 - w1, inW2)));
-                    uint8_t mask1 = w1 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w1) - 1u);
-                    uint8_t mask2 = w2 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w2) - 1u);
-                    uint8_t in1 = powerAt(x - 1, y, z) & mask1;
-                    uint8_t in2 = powerAt(x + 1, y, z) & mask2;
+                    uint8_t mask1 = w1 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w1) -1u);
+                    uint8_t mask2 = w2 >= 8 ? 0xFFu : static_cast<uint8_t>((1u << w2) -1u);
+                    uint8_t in1 = powerAtLocal(-1, 0, 0) & mask1;
+                    uint8_t in2 = powerAtLocal(+1, 0, 0) & mask2;
                     uint8_t busW = static_cast<uint8_t>(std::min<int>(8, w1 + w2));
                     uint8_t busVal = 0;
                     if (order == 0)
@@ -730,19 +775,19 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                     else
                         busVal = static_cast<uint8_t>((in1 << w2) | in2); // B1 in MSB
                     if (busVal)
-                        pushWire(x, y, z + 1, busVal, busW); // BUS out on +Z
+                        pushWireLocal(0, 0, +1, busVal, busW); // BUS out on +Z
                     out = 0;
                     break;
                 }
                 case BlockType::Decoder:
                 {
-                    uint8_t selW = widthAt(x - 1, y, z);
+                    uint8_t selW = widthAtLocal(-1, 0, 0);
                     if (selW == 0)
                         selW = 8;
                     uint8_t effectiveSelW = std::max<uint8_t>(1, std::min<uint8_t>(selW, 3)); // clamp to 1-3 bits (up to 8 outs)
-                    uint8_t selMask = effectiveSelW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << effectiveSelW) - 1u);
-                    uint8_t selVal = powerAt(x - 1, y, z) & selMask;
-                    bool enable = (powerAt(x + 1, y, z) & 0x1u) != 0;
+                    uint8_t selMask = effectiveSelW >= 8 ? 0xFFu : static_cast<uint8_t>((1u << effectiveSelW) -1u);
+                    uint8_t selVal = powerAtLocal(-1, 0, 0) & selMask;
+                    bool enable = (powerAtLocal(+1, 0, 0) & 0x1u) != 0;
                     if (enable)
                     {
                         uint8_t bit = static_cast<uint8_t>(selVal & 0x7u);
@@ -750,7 +795,7 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                         {
                             uint8_t outVal = static_cast<uint8_t>(1u << bit);
                             uint8_t outW = static_cast<uint8_t>(1u << effectiveSelW);
-                            pushWire(x, y, z + 1, outVal, outW);
+                            pushWireLocal(0, 0, +1, outVal, outW);
                         }
                     }
                     out = 0;
@@ -758,20 +803,20 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                 }
                 case BlockType::Multiplexer:
                 {
-                    uint8_t selW = widthAt(x - 1, y, z);
+                    uint8_t selW = widthAtLocal(-1, 0, 0);
                     if (selW == 0)
                         selW = 8;
                     uint8_t effectiveSelW = std::max<uint8_t>(1, std::min<uint8_t>(selW, 2)); // 2 bits max
-                    uint8_t selMask = static_cast<uint8_t>((1u << effectiveSelW) - 1u);
-                    uint8_t selVal = powerAt(x - 1, y, z) & selMask;
+                    uint8_t selMask = static_cast<uint8_t>((1u << effectiveSelW) -1u);
+                    uint8_t selVal = powerAtLocal(-1, 0, 0) & selMask;
 
                     auto inputVal = [&](int dx, int dy, int dz, uint8_t &wOut) -> uint8_t
                     {
-                        wOut = widthAt(x + dx, y + dy, z + dz);
+                        wOut = widthAtLocal(dx, dy, dz);
                         if (wOut == 0)
                             wOut = 8;
-                        uint8_t mask = wOut >= 8 ? 0xFFu : static_cast<uint8_t>((1u << wOut) - 1u);
-                        return static_cast<uint8_t>(powerAt(x + dx, y + dy, z + dz) & mask);
+                        uint8_t mask = wOut >= 8 ? 0xFFu : static_cast<uint8_t>((1u << wOut) -1u);
+                        return static_cast<uint8_t>(powerAtLocal(dx, dy, dz) & mask);
                     };
 
                     uint8_t widths[4] = {0, 0, 0, 0};
@@ -786,9 +831,9 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                     uint8_t outVal = values[idxSel];
                     uint8_t outWidth = widths[idxSel];
                     if (outVal)
-                        pushWire(x + 1, y, z, outVal, outWidth);
+                        pushWireLocal(+1, 0, 0, outVal, outWidth);
                     else
-                        setPower(x + 1, y, z, 0, outWidth);
+                        setPowerLocal(+1, 0, 0, 0, outWidth);
                     out = 0;
                     break;
                 }
@@ -813,10 +858,10 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                 }
                 case BlockType::Comparator:
                 {
-                    uint8_t wA = widthAt(x - 1, y, z);
-                    uint8_t wB = widthAt(x + 1, y, z);
-                    BlockType bLeft = world.inside(x - 1, y, z) ? world.get(x - 1, y, z) : BlockType::Air;
-                    BlockType bRight = world.inside(x + 1, y, z) ? world.get(x + 1, y, z) : BlockType::Air;
+                    uint8_t wA = widthAtLocal(-1, 0, 0);
+                    uint8_t wB = widthAtLocal(+1, 0, 0);
+                    BlockType bLeft = getLocal(-1, 0, 0);
+                    BlockType bRight = getLocal(1, 0, 0);
                     bool leftConnected = (bLeft == BlockType::Wire || bLeft == BlockType::Button || bLeft == BlockType::Led ||
                                           bLeft == BlockType::AndGate || bLeft == BlockType::OrGate ||
                                           bLeft == BlockType::XorGate || bLeft == BlockType::NotGate ||
@@ -843,10 +888,10 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
                     if (wB == 0)
                         wB = 1;
                     uint8_t w = static_cast<uint8_t>(std::max<uint8_t>(1, std::min<uint8_t>(std::min(wA, wB), 8)));
-                    uint16_t mask16 = w >= 8 ? 0xFFu : static_cast<uint16_t>((1u << w) - 1u);
+                    uint16_t mask16 = w >= 8 ? 0xFFu : static_cast<uint16_t>((1u << w) -1u);
                     // Swap A/B semantics: left face is B, right face is A
-                    uint8_t bVal = static_cast<uint8_t>(powerAt(x - 1, y, z) & mask16);
-                    uint8_t a = static_cast<uint8_t>(powerAt(x + 1, y, z) & mask16);
+                    uint8_t bVal = static_cast<uint8_t>(powerAtLocal(-1, 0, 0) & mask16);
+                    uint8_t a = static_cast<uint8_t>(powerAtLocal(+1, 0, 0) & mask16);
                     uint8_t outW = 1;
                     compGtOutputs.push_back({x, y, z});
                     compEqOutputs.push_back({x, y, z});
@@ -878,14 +923,19 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
         if (sourcesVal[i])
             queue.push_back(i);
 
+    auto outputPort = [&](const std::array<int, 3> &origin, int dx, int dy, int dz)
+    {
+        const auto [x, y, z] = origin;
+        const auto [rx, rz] = rotateHorizontal(dx, dz, world.getOrientation(x, y, z));
+        return std::array<int, 3>{x + rx, y + dy, z + rz};
+    };
+
     for (size_t idxOut = 0; idxOut < gateOutputs.size(); ++idxOut)
     {
         const auto &g = gateOutputs[idxOut];
         uint8_t val = gateOutVal[idxOut];
         uint8_t w = gateOutWidth[idxOut];
-        int ox = g[0];
-        int oy = g[1];
-        int oz = g[2] + 1;
+        const auto [ox, oy, oz] = outputPort(g, 0, 0, 1);
         if (!world.inside(ox, oy, oz))
             continue;
         BlockType outB = world.get(ox, oy, oz);
@@ -904,9 +954,7 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
         const auto &g = addSumOutputs[idxOut];
         uint8_t val = addSumVal[idxOut];
         uint8_t w = addSumWidth[idxOut];
-        int ox = g[0];
-        int oy = g[1];
-        int oz = g[2] + 1; // S toward +Z
+        const auto [ox, oy, oz] = outputPort(g, 0, 0, 1); // S toward +Z
         if (!world.inside(ox, oy, oz))
             continue;
         BlockType outB = world.get(ox, oy, oz);
@@ -949,9 +997,7 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
             const auto &g = outs[idxOut];
             uint8_t val = vals[idxOut];
             uint8_t w = widths[idxOut];
-            int ox = g[0] + dx;
-            int oy = g[1] + dy;
-            int oz = g[2] + dz;
+            const auto [ox, oy, oz] = outputPort(g, dx, dy, dz);
             if (!world.inside(ox, oy, oz))
                 continue;
             if (val)
@@ -971,9 +1017,7 @@ void updateLogic(World &world, void (*onChange)(int, int, int))
         const auto &g = notOutputs[idxOut];
         uint8_t val = notOutVal[idxOut];
         uint8_t w = notOutWidth[idxOut];
-        int ox = g[0] - 1;
-        int oy = g[1];
-        int oz = g[2];
+        const auto [ox, oy, oz] = outputPort(g, -1, 0, 0);
         if (!world.inside(ox, oy, oz))
             continue;
         BlockType outB = world.get(ox, oy, oz);

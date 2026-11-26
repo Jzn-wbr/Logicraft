@@ -42,6 +42,7 @@ struct SaveHeader
 bool writeSnapshot(std::ostream &out, const World &world, uint32_t seed)
 {
     SaveHeader hdr;
+    hdr.version = world.hasRotatedBlocks() ? 12 : 11;
     hdr.w = static_cast<uint32_t>(world.getWidth());
     hdr.h = static_cast<uint32_t>(world.getHeight());
     hdr.d = static_cast<uint32_t>(world.getDepth());
@@ -77,6 +78,8 @@ bool writeSnapshot(std::ostream &out, const World &world, uint32_t seed)
         out.write(reinterpret_cast<const char *>(&splitOrder), 1);
         out.write(reinterpret_cast<const char *>(&clkFreq), 1);
         out.write(reinterpret_cast<const char *>(&width), 1);
+        if (hdr.version >= 12)
+            writeInteger(out, world.getOrientation(x, y, z));
     }
 
     // Save sign texts (only for version >= 2)
@@ -122,7 +125,7 @@ bool readSnapshot(std::istream &in, World &destination, uint32_t &seedOut)
     readInteger(in, hdr.seed);
     if (!in || std::string(hdr.magic, hdr.magic + 7) != "BULLDOG")
         return false;
-    if (hdr.version < 1 || hdr.version > 11)
+    if (hdr.version < 1 || hdr.version > 12)
         return false;
     if (hdr.w != destination.getWidth() || hdr.h != destination.getHeight() || hdr.d != destination.getDepth())
         return false;
@@ -160,7 +163,11 @@ bool readSnapshot(std::istream &in, World &destination, uint32_t &seedOut)
         uint8_t width = 8;
         if (hdr.version >= 11)
             in.read(reinterpret_cast<char *>(&width), 1);
-        if (width < 1 || width > 8 || b > static_cast<uint8_t>(BlockType::Clock))
+        uint8_t orientation = 0;
+        if (hdr.version >= 12)
+            readInteger(in, orientation);
+        if (orientation > 3 || (orientation && !isDirectional(static_cast<BlockType>(b))) ||
+            width < 1 || width > 8 || b > static_cast<uint8_t>(BlockType::Clock))
             return false;
         if (!in)
             return false;
@@ -187,6 +194,7 @@ bool readSnapshot(std::istream &in, World &destination, uint32_t &seedOut)
         int y = (i / world.getWidth()) / world.getDepth();
         int z = (i / world.getWidth()) % world.getDepth();
         world.set(x, y, z, static_cast<BlockType>(b));
+        world.setOrientation(x, y, z, orientation);
         world.setPower(x, y, z, p);
         world.setPowerWidth(x, y, z, width);
         world.setButtonState(x, y, z, btn);
@@ -258,16 +266,16 @@ bool readSnapshot(std::istream &in, World &destination, uint32_t &seedOut)
     return true;
 }
 
-bool loadWorldFromFile(World &world, const std::string &path, uint32_t &seed)
+bool loadWorldFromFile(World &world, const std::filesystem::path &path, uint32_t &seed)
 {
     std::ifstream in(path, std::ios::binary);
     return readSnapshot(in, world, seed);
 }
 
-bool saveWorldToFile(const World &world, const std::string &path, uint32_t seed)
+bool saveWorldToFile(const World &world, const std::filesystem::path &path, uint32_t seed)
 {
     namespace fs = std::filesystem;
-    fs::path target(path);
+    const fs::path &target = path;
     std::error_code ec;
     if (target.has_parent_path())
         fs::create_directories(target.parent_path(), ec);

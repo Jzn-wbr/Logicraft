@@ -34,6 +34,31 @@ enum class BlockType
     Clock
 };
 
+constexpr bool isDirectional(BlockType type)
+{
+    switch (type)
+    {
+    case BlockType::AndGate: case BlockType::OrGate: case BlockType::NotGate: case BlockType::XorGate:
+    case BlockType::DFlipFlop: case BlockType::AddGate: case BlockType::Counter:
+    case BlockType::Splitter: case BlockType::Merger: case BlockType::Decoder:
+    case BlockType::Multiplexer: case BlockType::Comparator: case BlockType::Clock:
+        return true;
+    default:
+        return false;
+    }
+}
+
+constexpr std::array<int, 2> rotateHorizontal(int x, int z, uint8_t turns)
+{
+    switch (turns & 3)
+    {
+    case 1: return {-z, x};
+    case 2: return {-x, -z};
+    case 3: return {z, -x};
+    default: return {x, z};
+    }
+}
+
 struct BlockInfo
 {
     std::string name;

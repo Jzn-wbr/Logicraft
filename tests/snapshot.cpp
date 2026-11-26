@@ -51,5 +51,36 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; ++i)
         if (!loadWorldFromFile(legacy, argv[i], seed))
             return 5;
+
+    for (uint8_t turns = 0; turns < 4; ++turns)
+    {
+        World circuit(5, 1, 5);
+        circuit.set(2, 0, 2, BlockType::NotGate);
+        circuit.setOrientation(2, 0, 2, turns);
+        auto [dx, dz] = rotateHorizontal(1, 0, turns);
+        circuit.set(2 + dx, 0, 2 + dz, BlockType::Wire);
+        circuit.setPower(2 + dx, 0, 2 + dz, 1);
+        circuit.setPowerWidth(2 + dx, 0, 2 + dz, 3);
+        circuit.set(2 - dx, 0, 2 - dz, BlockType::Wire);
+
+        std::stringstream encoded;
+        World decoded(5, 1, 5);
+        if (!writeSnapshot(encoded, circuit, 42) || !readSnapshot(encoded, decoded, seed) ||
+            decoded.getOrientation(2, 0, 2) != turns ||
+            static_cast<unsigned char>(encoded.str()[8]) != (turns ? 12 : 11))
+            return 6;
+        updateLogic(decoded);
+        if (decoded.getPower(2 - dx, 0, 2 - dz) != 6 || decoded.getPowerWidth(2 - dx, 0, 2 - dz) != 3)
+            return 7;
+
+        if (turns)
+        {
+            std::string invalid = encoded.str();
+            invalid[36 + 12 * 10 + 9] = 4; // orientation of the center cell
+            std::istringstream corrupted(invalid);
+            if (readSnapshot(corrupted, decoded, seed) || decoded.getOrientation(2, 0, 2) != turns)
+                return 8;
+        }
+    }
     return 0;
 }

@@ -72,26 +72,44 @@ Vous n’avez besoin que du fichier `.exe`.
 | Action | Touche |
 | --- | --- |
 | Regarder autour de soi | Souris |
-| Se déplacer | `W/A/S/D` ou `Z/Q` (AZERTY) |
+| Se déplacer | `W/A/S/D` (Auto accepte aussi `Z` pour avancer) ou `Z/Q/S/D` avec le profil AZERTY |
 | Sauter | `Espace` — deux appuis pour voler |
-| Descendre en mode vol | `Maj` |
-| Casser un bloc | Clic gauche |
-| Poser un bloc / actionner un bouton / modifier un panneau | Clic droit |
+| Sprinter | Deux appuis sur Avancer, ou `Alt` |
+| S’accroupir au sol / descendre en vol | `Maj` |
+| Casser ou poser plusieurs blocs | Maintenir le clic gauche ou droit |
+| Actionner un bouton ou modifier un panneau | Clic droit, `Maj` + clic droit pour poser à côté |
+| Sélectionner le bloc visé / copier ses réglages | Clic molette / `Ctrl` + clic molette |
 | Changer de case rapide | Molette |
-| Sélectionner une case | `1` à `8` |
-| Ouvrir l’inventaire | `E` |
-| Ouvrir les réglages d’un bloc | `Q` |
+| Sélectionner une case | `1` à `9` |
+| Ouvrir l’inventaire / afficher la palette créative | `E` / `Tab` dans l’inventaire |
+| Ouvrir les réglages du bloc visé | `Q` par défaut, `F` si `Q` sert à aller à gauche |
+| Orienter un composant avant la pose / tourner le bloc visé | `T` / `Maj` + `T` |
+| Annuler / rétablir une modification | `Ctrl` + `Z` / `Ctrl` + `Y` |
 | Revenir au point de départ | `R` |
+| Sélectionner deux coins / copier / afficher l’aperçu | `Ctrl` + `B` deux fois / `Ctrl` + `C` / `Ctrl` + `V` |
+| Tourner le groupe / confirmer le collage | `T` / `Entrée` |
+| Charger / sauvegarder un circuit réutilisable | `F3` / `F4` |
+| Pause de simulation / un tick / changer la vitesse | `F6` / `F7` / `F8` |
+| Poser ou retirer une sonde sur le bloc visé | `F9` |
 | Plein écran | `F11` |
 | Menu pause / fermer une fenêtre | `Échap` |
 
+Les réglages proposent des profils clavier et des raccourcis modifiables pour les déplacements, l’inventaire, la configuration des blocs, la rotation et le retour au départ.
+
+Un **tick** est une mise à jour des circuits. **SIM. 20 TICKS/S** indique une cadence cible de vingt mises à jour par seconde, et **TICK** indique le nombre de mises à jour écoulées depuis la création de la carte. Le bus reste actif dans l’inspecteur ouvert avec `Q`. Utilisez `F6` pour mettre la simulation en pause, `F7` pour avancer d’un seul tick et `F8` pour choisir 20, 10 ou 5 ticks par seconde.
+
+En jeu, le clic gauche manipule une pile et le clic droit en prend la moitié ou dépose une unité. Le glissement répartit la pile, le double clic rassemble les objets identiques, et `Maj` transfère une pile vers l’autre zone ou toutes les piles identiques avec un double clic. Survole une case et appuie sur `1` à `9` pour l’échanger avec ce raccourci. Dans la palette créative, tape pour filtrer, appuie sur `Entrée` pour changer de catégorie et utilise le clic molette pour marquer un favori.
+
 ## Cartes et sauvegardes
 
-Appuyez sur `Échap`, puis choisissez **SAVE / LOAD** pour ouvrir le menu des sauvegardes.
+Utilisez **Cartes** à l’accueil, **SAVE / LOAD** dans le menu pause ou `Ctrl` + `O` pour ouvrir le gestionnaire. Le gestionnaire donne aussi accès au tutoriel bouton–fil–LED.
 
-- **Create** crée une nouvelle carte avec le nom saisi.
-- **Overwrite** remplace la sauvegarde sélectionnée.
-- **Load** ouvre la sauvegarde sélectionnée.
+- **Enregistrer** ou `Ctrl` + `S` enregistre la carte active. **Enregistrer sous** dans le gestionnaire ou `Ctrl` + `Maj` + `S` permet de choisir un autre nom.
+- **Écraser** demande une confirmation dans le jeu. Charger une carte ou quitter avec des modifications propose **Annuler**, **Sans enregistrer** ou **Enregistrer**.
+- **Reprendre** ouvre la sauvegarde la plus récente. Jusqu’à trois versions automatiques figurent dans la liste sous un nom commençant par `recuperation-`.
+- Le fichier compagnon `.bulldog.hotbar` contient les raccourcis et favoris de la carte. Gardez-le avec le fichier `.bulldog` lors d’une copie manuelle.
+
+Les anciennes cartes restent lisibles. Les cartes avec des composants tournés utilisent le format v12. Il reprend l’en-tête et la table des panneaux du format v11, avec un dixième octet par cellule pour le nombre de quarts de tour horizontaux, de 0 à 3. Les autres cartes sont toujours écrites en v11.
 
 ---
 
