@@ -82,5 +82,33 @@ int main(int argc, char **argv)
                 return 8;
         }
     }
+
+    // A zero-valued bus retains the width of its driver, including after a width-only edit.
+    World bus(5, 1, 1);
+    bus.set(0, 0, 0, BlockType::Button);
+    for (int x = 1; x < 5; ++x)
+        bus.set(x, 0, 0, BlockType::Wire);
+    for (uint8_t width = 1; width <= 8; ++width)
+    {
+        bus.setButtonWidth(0, 0, 0, width);
+        int notified = 0;
+        updateLogic(bus, {}, [&](int x, int, int) { notified += x > 0; });
+        if (notified != 4)
+            return 9;
+        for (int x = 1; x < 5; ++x)
+            if (bus.getPower(x, 0, 0) != 0 || bus.getPowerWidth(x, 0, 0) != width)
+                return 10;
+    }
+
+    World splitter(3, 1, 3);
+    splitter.set(1, 0, 1, BlockType::Splitter);
+    splitter.setSplitterWidth(1, 0, 1, 2);
+    splitter.set(1, 0, 0, BlockType::Wire);
+    splitter.setPowerWidth(1, 0, 0, 5);
+    splitter.set(0, 0, 1, BlockType::Wire);
+    splitter.set(2, 0, 1, BlockType::Wire);
+    updateLogic(splitter);
+    if (splitter.getPowerWidth(0, 0, 1) != 2 || splitter.getPowerWidth(2, 0, 1) != 3)
+        return 11;
     return 0;
 }

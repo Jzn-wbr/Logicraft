@@ -50,7 +50,7 @@
 
 - [x] Inspection de la valeur et de la largeur des signaux, rep?res de direction sur les ports et indication des branchements incompatibles.
 - [x] Configuration sur place avec limites des champs, aperçu des ports et copie des réglages.
-- [x] Pause, avance d’un tick et vitesse de simulation, sondes et historique.
+- [x] Simulation à cadence fixe, sondes et historique des signaux.
 - [x] Sélection, copie, rotation et collage de groupes avec aperçu, circuits réutilisables et cartes d’exemple.
 
 ## Vérification

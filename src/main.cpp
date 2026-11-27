@@ -1250,7 +1250,7 @@ void drawClockEditBox(int winW, int winH, const std::string &freqText)
     signText(textX, textY + 90.0f, 1.5f, "Entrer pour valider, Esc pour annuler");
 }
 
-void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value, const std::string &simulationStatus)
+void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value)
 {
     float boxW = 360.0f;
     float boxH = 200.0f;
@@ -1277,8 +1277,7 @@ void drawWireInfoBox(int winW, int winH, uint8_t width, uint8_t value, const std
     std::snprintf(buf, sizeof(buf), "Valeur binaire : %s", bin.c_str());
     signText(textX, textY + 56.0f, 2.0f, buf);
 
-    signText(textX, textY + 90.0f, 1.7f, simulationStatus);
-    signText(textX, textY + 115.0f, 1.5f, "F6 PAUSE  F7 UN TICK  ESC FERMER");
+    signText(textX, textY + 100.0f, 1.5f, "ESC FERMER");
 }
 
 void drawSplitterEditBox(int winW, int winH, bool isMerger, const std::string &widthText, bool order)
@@ -1871,13 +1870,20 @@ inline void drawSlotIcon(const ItemStack &slot, float x, float y, float slotSize
         break;
     }
     case BlockType::Wire:
-        glColor4f(1.0f, 0.9f, 0.3f, 0.95f);
-        glBegin(GL_LINE_STRIP);
-        glVertex2f(x + slotSize * 0.15f, y + slotSize * 0.65f);
-        glVertex2f(x + slotSize * 0.35f, y + slotSize * 0.55f);
-        glVertex2f(x + slotSize * 0.55f, y + slotSize * 0.7f);
-        glVertex2f(x + slotSize * 0.82f, y + slotSize * 0.4f);
-        glEnd();
+        glLineWidth(2.0f);
+        for (float phase : {0.0f, 3.14159265f})
+        {
+            glColor4f(0.87f, 0.33f, 0.48f, 1.0f);
+            glBegin(GL_LINE_STRIP);
+            for (int i = 0; i <= 16; ++i)
+            {
+                float t = i / 16.0f;
+                glVertex2f(x + slotSize * (0.15f + 0.70f * t),
+                           y + slotSize * (0.5f + 0.12f * std::sin(t * 12.56637f + phase)));
+            }
+            glEnd();
+        }
+        glLineWidth(1.0f);
         break;
     case BlockType::NotGate:
     {
@@ -2577,9 +2583,7 @@ int main(int argc, char **argv)
     bool flying = false;
     float jumpUntil = -1.0f;
     float groundedUntil = -1.0f;
-    bool simulationPaused = false;
-    bool stepSimulation = false;
-    int simulationRate = 20;
+    constexpr float tickInterval = 1.0f / 20.0f;
     float tickBudget = 0.0f;
 
     std::optional<MapConfirmation> confirmation;
@@ -2592,11 +2596,6 @@ int main(int argc, char **argv)
     auto canPlay = [&]
     {
         return canSimulate() && !gButtonEditOpen && !gSplitterEditOpen && !gWireInfoOpen && !gClockEditOpen;
-    };
-    auto simulationStatus = [&]
-    {
-        std::string speed = simulationPaused ? "PAUSE" : std::to_string(simulationRate) + " TICKS/S";
-        return "SIM. " + speed + "   TICK " + std::to_string(world.tick());
     };
     auto resetPosition = [&]
     {
@@ -3536,12 +3535,6 @@ int main(int argc, char **argv)
                 }
                 else if (canPlay() && !e.key.repeat && (e.key.keysym.sym == SDLK_F3 || e.key.keysym.sym == SDLK_F4))
                     exchangeTemplate(e.key.keysym.sym == SDLK_F4);
-                else if (canSimulate() && !e.key.repeat && e.key.keysym.sym == SDLK_F6)
-                    simulationPaused = !simulationPaused;
-                else if (canSimulate() && !e.key.repeat && e.key.keysym.sym == SDLK_F7 && simulationPaused)
-                    stepSimulation = true;
-                else if (canSimulate() && !e.key.repeat && e.key.keysym.sym == SDLK_F8)
-                    simulationRate = simulationRate == 20 ? 10 : (simulationRate == 10 ? 5 : 20);
                 else if (e.key.keysym.sym >= SDLK_1 && e.key.keysym.sym <= SDLK_9 && !paletteOpen && !pauseMenuOpen && !gSignEditOpen &&
                          !gButtonEditOpen && !gWireInfoOpen && !gSplitterEditOpen && !gClockEditOpen)
                 {
@@ -4540,7 +4533,17 @@ int main(int argc, char **argv)
 
         auto advanceTick = [&]
         {
-            updateLogic(world, markChunkFromBlock);
+            updateLogic(world,
+                [&](int x, int y, int z)
+                {
+                    if (world.get(x, y, z) != BlockType::Wire)
+                        markChunkFromBlock(x, y, z);
+                },
+                [&](int x, int y, int z)
+                {
+                    if (world.get(x, y, z) == BlockType::Wire)
+                        markNeighborsDirty(x, y, z);
+                });
             if (tutorial == 4 && poweredTutorialLed)
             {
                 const auto [x, y, z] = *poweredTutorialLed;
@@ -4555,22 +4558,15 @@ int main(int argc, char **argv)
                 samples.emplace_back(world.getPower(x, y, z), world.getPowerWidth(x, y, z));
             }
         };
-        const bool simulate = canSimulate();
-        if (simulate && !simulationPaused)
+        if (canSimulate())
         {
-            const float interval = 1.0f / simulationRate;
-            tickBudget = std::min(tickBudget + dt, 2.0f * interval);
-            while (tickBudget >= interval)
+            tickBudget = std::min(tickBudget + dt, 2.0f * tickInterval);
+            while (tickBudget >= tickInterval)
             {
                 advanceTick();
-                tickBudget -= interval;
+                tickBudget -= tickInterval;
             }
         }
-        else if (simulate && stepSimulation)
-        {
-            advanceTick();
-        }
-        stepSimulation = false;
         glClearColor(0.55f, 0.75f, 0.95f, 1);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glLoadIdentity();
@@ -4760,7 +4756,6 @@ int main(int argc, char **argv)
             drawInventoryBar(winW, winH, hotbarSlots, selected);
             if (play)
             {
-                hudText(20.0f, 88.0f, 2, simulationStatus());
                 if (tutorial > 0)
                 {
                     static constexpr const char *steps[] = {"", "1  POSEZ UN BOUTON AVEC LE CLIC DROIT",
@@ -4861,7 +4856,7 @@ int main(int argc, char **argv)
                 uint8_t mask = gWireInfoWidth >= 8 ? 0xFFu : static_cast<uint8_t>((1u << gWireInfoWidth) - 1u);
                 gWireInfoValue = static_cast<uint8_t>(world.getPower(gWireInfoX, gWireInfoY, gWireInfoZ) & mask);
             }
-            drawWireInfoBox(winW, winH, gWireInfoWidth, gWireInfoValue, simulationStatus());
+            drawWireInfoBox(winW, winH, gWireInfoWidth, gWireInfoValue);
         }
         if (gSplitterEditOpen)
             drawSplitterEditBox(winW, winH, gSplitterIsMerger, gSplitterWidthBuffer, gSplitterOrder);

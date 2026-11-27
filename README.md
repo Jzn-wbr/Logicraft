@@ -89,14 +89,13 @@ Vous n’avez besoin que du fichier `.exe`.
 | Sélectionner deux coins / copier / afficher l’aperçu | `Ctrl` + `B` deux fois / `Ctrl` + `C` / `Ctrl` + `V` |
 | Tourner le groupe / confirmer le collage | `T` / `Entrée` |
 | Charger / sauvegarder un circuit réutilisable | `F3` / `F4` |
-| Pause de simulation / un tick / changer la vitesse | `F6` / `F7` / `F8` |
 | Poser ou retirer une sonde sur le bloc visé | `F9` |
 | Plein écran | `F11` |
 | Menu pause / fermer une fenêtre | `Échap` |
 
 Les réglages proposent des profils clavier et des raccourcis modifiables pour les déplacements, l’inventaire, la configuration des blocs, la rotation et le retour au départ.
 
-Un **tick** est une mise à jour des circuits. **SIM. 20 TICKS/S** indique une cadence cible de vingt mises à jour par seconde, et **TICK** indique le nombre de mises à jour écoulées depuis la création de la carte. Le bus reste actif dans l’inspecteur ouvert avec `Q`. Utilisez `F6` pour mettre la simulation en pause, `F7` pour avancer d’un seul tick et `F8` pour choisir 20, 10 ou 5 ticks par seconde.
+La simulation vise une cadence fixe de vingt mises à jour par seconde. Les câbles sangria ont un brin par bit de largeur, y compris quand la valeur est zéro. L’inspecteur de bus affiche la largeur et la valeur du signal en direct.
 
 En jeu, le clic gauche manipule une pile et le clic droit en prend la moitié ou dépose une unité. Le glissement répartit la pile, le double clic rassemble les objets identiques, et `Maj` transfère une pile vers l’autre zone ou toutes les piles identiques avec un double clic. Survole une case et appuie sur `1` à `9` pour l’échanger avec ce raccourci. Dans la palette créative, tape pour filtrer, appuie sur `Entrée` pour changer de catégorie et utilise le clic molette pour marquer un favori.
 

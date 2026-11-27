@@ -1,4 +1,6 @@
 #include "render.hpp"
+#include "cable_mesh.hpp"
+#include "circuit_ports.hpp"
 
 #include <SDL2/SDL.h>
 #include <algorithm>
@@ -324,32 +326,18 @@ void fillStoneBrickTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const 
     }
 }
 
-void fillWireTile(std::vector<uint8_t> &pix, int texW, int tileIdx, const std::array<float, 3> &baseColor)
+void fillWireTile(std::vector<uint8_t> &pix, int texW, int tileIdx)
 {
-    int tileX = tileIdx % ATLAS_COLS;
-    int tileY = tileIdx / ATLAS_COLS;
-    int x0 = tileX * ATLAS_TILE_SIZE;
-    int y0 = tileY * ATLAS_TILE_SIZE;
-
-    auto toByte = [](float v)
-    { return static_cast<uint8_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f); };
-
+    const int x0 = tileIdx % ATLAS_COLS * ATLAS_TILE_SIZE;
+    const int y0 = tileIdx / ATLAS_COLS * ATLAS_TILE_SIZE;
     for (int y = 0; y < ATLAS_TILE_SIZE; ++y)
-    {
         for (int x = 0; x < ATLAS_TILE_SIZE; ++x)
         {
-            float n = hashNoise(x, y + tileIdx * 13, 43);
-            float grain = (hashNoise(x * 3, y * 3 + 7, 91) - 0.5f) * 0.05f;
-            float stripe = ((x + y) % 9 == 0) ? 0.025f : 0.0f;
-            float xNorm = static_cast<float>(x) / static_cast<float>(ATLAS_TILE_SIZE - 1);
-            float highlight = 0.06f * (0.5f + 0.5f * std::cos((xNorm - 0.35f) * 3.1415926f));
-            float shade = 0.3f + n * 0.08f + grain + stripe + highlight;
-            float r = baseColor[0] * shade;
-            float g = baseColor[1] * shade;
-            float b = baseColor[2] * shade;
-            writePixel(pix, texW, x0 + x, y0 + y, toByte(r), toByte(g), toByte(b), 255);
+            float grain = hashNoise(x, y, 43) * 12.0f;
+            float weave = (x + 2 * y) % 5 < 2 ? 10.0f : 0.0f;
+            uint8_t shade = static_cast<uint8_t>(231.0f + grain + weave);
+            writePixel(pix, texW, x0 + x, y0 + y, shade, shade, shade, 255);
         }
-    }
 }
 
 int tinyTextWidthOnTile(const std::string &text, int scale)
@@ -971,7 +959,7 @@ void createAtlasTexture()
     fillTile(pixels, texW, gBlockTile[BlockType::Counter], base(BlockType::Counter), 12);
     fillTile(pixels, texW, gBlockTile[BlockType::Led], base(BlockType::Led), 17);
     fillTile(pixels, texW, gBlockTile[BlockType::Button], base(BlockType::Button), 18);
-    fillWireTile(pixels, texW, gBlockTile[BlockType::Wire], base(BlockType::Wire));
+    fillWireTile(pixels, texW, gBlockTile[BlockType::Wire]);
     fillTile(pixels, texW, gBlockTile[BlockType::NotGate], base(BlockType::NotGate), 20);
     fillTile(pixels, texW, gBlockTile[BlockType::Sign], base(BlockType::Sign), 1);
     fillTile(pixels, texW, gBlockTile[BlockType::Splitter], base(BlockType::Splitter), 22);
@@ -1284,68 +1272,6 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
         push(maxX, maxY, minZ, u0, v0);
         push(maxX, minY, minZ, u0, v1);
     };
-    auto addWireBox = [&](float minX, float minY, float minZ, float maxX, float maxY, float maxZ,
-                          const std::array<float, 3> &col, int tile, float emissive)
-    {
-        float br = col[0];
-        float bg = col[1];
-        float bb = col[2];
-        float du = 1.0f / ATLAS_COLS;
-        float dv = 1.0f / ATLAS_ROWS;
-        int tx = tile % ATLAS_COLS;
-        int ty = tile / ATLAS_COLS;
-        const float pad = 0.0015f;
-        float u0 = tx * du + pad;
-        float v0 = ty * dv + pad;
-        float u1 = (tx + 1) * du - pad;
-        float v1 = (ty + 1) * dv - pad;
-
-        auto push = [&](float px, float py, float pz, float u, float v, float shade)
-        {
-            float r = std::clamp(br * shade, 0.0f, 1.0f);
-            float g = std::clamp(bg * shade, 0.0f, 1.0f);
-            float b = std::clamp(bb * shade, 0.0f, 1.0f);
-            mesh.verts.push_back(Vertex{px, py, pz, u, v, r, g, b});
-        };
-
-        float sPX = faceLight(1, 0, 0, emissive);
-        float sNX = faceLight(-1, 0, 0, emissive);
-        float sPY = faceLight(0, 1, 0, emissive);
-        float sNY = faceLight(0, -1, 0, emissive);
-        float sPZ = faceLight(0, 0, 1, emissive);
-        float sNZ = faceLight(0, 0, -1, emissive);
-
-        push(maxX, minY, minZ, u1, v1, sPX);
-        push(maxX, maxY, minZ, u1, v0, sPX);
-        push(maxX, maxY, maxZ, u0, v0, sPX);
-        push(maxX, minY, maxZ, u0, v1, sPX);
-
-        push(minX, minY, minZ, u1, v1, sNX);
-        push(minX, minY, maxZ, u0, v1, sNX);
-        push(minX, maxY, maxZ, u0, v0, sNX);
-        push(minX, maxY, minZ, u1, v0, sNX);
-
-        push(minX, maxY, minZ, u1, v1, sPY);
-        push(maxX, maxY, minZ, u0, v1, sPY);
-        push(maxX, maxY, maxZ, u0, v0, sPY);
-        push(minX, maxY, maxZ, u1, v0, sPY);
-
-        push(minX, minY, minZ, u1, v1, sNY);
-        push(maxX, minY, minZ, u0, v1, sNY);
-        push(maxX, minY, maxZ, u0, v0, sNY);
-        push(minX, minY, maxZ, u1, v0, sNY);
-
-        push(minX, minY, maxZ, u1, v1, sPZ);
-        push(maxX, minY, maxZ, u0, v1, sPZ);
-        push(maxX, maxY, maxZ, u0, v0, sPZ);
-        push(minX, maxY, maxZ, u1, v0, sPZ);
-
-        push(minX, minY, minZ, u1, v1, sNZ);
-        push(minX, maxY, minZ, u1, v0, sNZ);
-        push(maxX, maxY, minZ, u0, v0, sNZ);
-        push(maxX, minY, minZ, u0, v1, sNZ);
-    };
-
     for (int y = y0; y < y1; ++y)
     {
         for (int z = z0; z < z1; ++z)
@@ -1386,13 +1312,6 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                     color[0] = std::min(color[0] * 0.25f + desat, 1.0f);
                     color[1] = std::min(color[1] * 0.25f + desat, 1.0f);
                     color[2] = std::min(color[2] * 0.25f + desat, 1.0f);
-                }
-                else if (b == BlockType::Wire && world.getPower(x, y, z))
-                {
-                    color[0] = std::min(color[0] * 0.7f + 0.35f, 1.0f);
-                    color[1] = std::min(color[1] * 0.7f + 0.55f, 1.0f);
-                    color[2] = std::min(color[2] * 0.7f + 0.75f, 1.0f);
-                    emissive = 0.6f;
                 }
                 else if (b == BlockType::DFlipFlop && world.getPower(x, y, z))
                 {
@@ -1481,136 +1400,44 @@ void buildChunkMesh(const World &world, int cx, int cy, int cz)
                 };
                 if (b == BlockType::Wire)
                 {
-                    auto connects = [&](int dx, int dy, int dz)
+                    constexpr std::array<std::array<int, 3>, 6> offsets{{
+                        {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}
+                    }};
+                    std::array<cable::End, 6> ends{};
+                    int count = 0;
+                    const int width = std::clamp<int>(world.getPowerWidth(x, y, z), 1, 8);
+                    for (const auto &[dx, dy, dz] : offsets)
                     {
-                        int xx = x + dx;
-                        int yy = y + dy;
-                        int zz = z + dz;
-                        if (!world.inside(xx, yy, zz))
-                            return false;
-                        BlockType nb = world.get(xx, yy, zz);
-                        if (nb == BlockType::NotGate)
+                        int nx = x + dx, ny = y + dy, nz = z + dz;
+                        if (!world.inside(nx, ny, nz))
+                            continue;
+                        BlockType neighbor = world.get(nx, ny, nz);
+                        uint8_t turns = world.getOrientation(nx, ny, nz);
+                        const auto &ports = circuitPorts(neighbor);
+                        bool connected = neighbor == BlockType::Wire || neighbor == BlockType::Button ||
+                                         neighbor == BlockType::Led ||
+                                         std::any_of(ports.begin(), ports.end(), [&](const CircuitPort &port)
+                                         {
+                                             auto [px, pz] = rotateHorizontal(port.x, port.z, turns);
+                                             return px == -dx && port.y == -dy && pz == -dz;
+                                         });
+                        if (connected)
                         {
-                            // Only connect on right (input) or left (output) sides
-                            if (dx == 1)
-                                return true; // input side
-                            if (dx == -1)
-                                return true; // output side
-                            return false;
+                            bool cap = neighbor == BlockType::Wire && world.getPowerWidth(nx, ny, nz) != width;
+                            ends[count++] = {{static_cast<float>(dx), static_cast<float>(dy), static_cast<float>(dz)}, cap};
                         }
-                        if (nb == BlockType::Counter)
-                        {
-                            // Counter input is on its +X face, so from the wire perspective the counter is at dx = -1
-                            return dx == -1;
-                        }
-                        if (nb == BlockType::AndGate || nb == BlockType::OrGate || nb == BlockType::XorGate ||
-                            nb == BlockType::DFlipFlop || nb == BlockType::AddGate)
-                        {
-                            // Inputs on left/right, Cin on -Z, Sum on +Z, Cout on -Y (top face is non-connectable)
-                            if (dx == 1 || dx == -1)
-                                return true; // P/Q
-                            if (dz == -1)
-                                return true; // Cin
-                            if (dz == 1)
-                                return true; // Sum
-                            if (dy == 1)
-                                return true; // Cout (wire is below, gate above)
-                            if (dy == -1)
-                                return false; // top blocked
-                            if (nb == BlockType::Counter)
-                            {
-                                // only +X input
-                                return dx == 1;
-                            }
-                            return false;
-                        }
-                        if (nb == BlockType::Splitter)
-                        {
-                            // BUS on -Z (in), B1 on -X (out), B2 on +X (out)
-                            if (dx == -1 || dx == 1)
-                                return true;
-                            if (dz == 1)
-                                return true; // BUS side (wire is at z-1, so from wire view dz=+1)
-                            return false;
-                        }
-                        if (nb == BlockType::Merger)
-                        {
-                            // B1 on -X (in), B2 on +X (in), BUS on +Z (out)
-                            if (dx == -1 || dx == 1)
-                                return true; // inputs
-                            if (dz == -1)
-                                return true; // BUS side (+Z face of merger)
-                            return false;
-                        }
-                        if (nb == BlockType::Decoder)
-                        {
-                            // SEL on -X (in), EN on +X (in), OUT on +Z
-                            if (dx == -1 || dx == 1)
-                                return true;
-                            if (dz == -1)
-                                return true; // OUT (+Z)
-                            return false;
-                        }
-                        if (nb == BlockType::Multiplexer)
-                        {
-                            // SEL on -X, OUT on +X, D0 on -Z, D1 on +Z, D2 on -Y, D3 on +Y
-                            if (dx == -1 || dx == 1)
-                                return true;
-                            if (dz == -1 || dz == 1)
-                                return true;
-                            if (dy == -1 || dy == 1)
-                                return true;
-                            return false;
-                        }
-                        if (nb == BlockType::Clock)
-                        {
-                            // Output on +Z only
-                            return dz == -1;
-                        }
-                        if (nb == BlockType::Comparator)
-                        {
-                            // Inputs on -X/+X, outputs: > on -Z, = on +Z, < on -Y. Top (+Y) not connectable.
-                            if (dy == -1)
-                                return false; // top blocked
-                            if (dx == -1 || dx == 1)
-                                return true; // inputs
-                            if (dz == -1 || dz == 1)
-                                return true; // front/back outputs
-                            if (dy == 1)
-                                return true; // downward output
-                            return false;
-                        }
-                        return nb == BlockType::Wire || nb == BlockType::Button || nb == BlockType::Led ||
-                               nb == BlockType::AndGate || nb == BlockType::OrGate || nb == BlockType::DFlipFlop ||
-                               nb == BlockType::Counter;
+                    }
+
+                    const float uBase = (tIdx % ATLAS_COLS) / static_cast<float>(ATLAS_COLS);
+                    const float vBase = (tIdx / ATLAS_COLS) / static_cast<float>(ATLAS_ROWS);
+                    auto cableVertex = [&](Vec3 p, Vec3 normal, float u, float v)
+                    {
+                        const float shade = 0.64f + 0.36f * std::clamp(0.5f + 0.5f * (normal.x * lx + normal.y * ly + normal.z * lz), 0.0f, 1.0f);
+                        return Vertex{p.x, p.y, p.z, uBase + (0.08f + 0.84f * u) / ATLAS_COLS,
+                                      vBase + (0.08f + 0.84f * v) / ATLAS_ROWS,
+                                      color[0] * shade, color[1] * shade, color[2] * shade};
                     };
-
-                    float cx = static_cast<float>(x) + 0.5f;
-                    float cy = static_cast<float>(y) + 0.5f;
-                    float cz = static_cast<float>(z) + 0.5f;
-                    const float half = 0.12f;
-                    const float margin = 0.04f;
-                    const float join = 0.002f;
-
-                    addWireBox(cx - half, cy - half, cz - half, cx + half, cy + half, cz + half, color, tIdx, emissive);
-                    if (connects(1, 0, 0))
-                        addWireBox(cx + join, cy - half, cz - half, static_cast<float>(x + 1) - margin, cy + half, cz + half,
-                                   color, tIdx, emissive);
-                    if (connects(-1, 0, 0))
-                        addWireBox(static_cast<float>(x) + margin, cy - half, cz - half, cx - join, cy + half, cz + half, color,
-                                   tIdx, emissive);
-                    if (connects(0, 1, 0))
-                        addWireBox(cx - half, cy + join, cz - half, cx + half, static_cast<float>(y + 1) - margin, cz + half,
-                                   color, tIdx, emissive);
-                    if (connects(0, -1, 0))
-                        addWireBox(cx - half, static_cast<float>(y) + margin, cz - half, cx + half, cy - join, cz + half, color,
-                                   tIdx, emissive);
-                    if (connects(0, 0, 1))
-                        addWireBox(cx - half, cy - half, cz + join, cx + half, cy + half, static_cast<float>(z + 1) - margin,
-                                   color, tIdx, emissive);
-                    if (connects(0, 0, -1))
-                        addWireBox(cx - half, cy - half, static_cast<float>(z) + margin, cx + half, cy + half, cz - join, color,
-                                   tIdx, emissive);
+                    cable::append(mesh.verts, {x + 0.5f, y + 0.5f, z + 0.5f}, ends, count, width, cableVertex);
                     continue;
                 }
 

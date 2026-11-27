@@ -2,6 +2,7 @@
 
 #include "world_types.hpp"
 
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -78,4 +79,5 @@ HitInfo raycast(const World &world, float ox, float oy, float oz, float dx, floa
 bool collidesAt(const World &world, float px, float py, float pz, float playerHeight);
 bool blockIntersectsPlayer(const Player &player, int bx, int by, int bz, float playerHeight);
 
-void updateLogic(World &world, void (*onChange)(int, int, int) = nullptr);
+using CellChangeCallback = std::function<void(int, int, int)>;
+void updateLogic(World &world, const CellChangeCallback &onChange = {}, const CellChangeCallback &onWidthChange = {});
